@@ -21,7 +21,9 @@ public final class NodeBuilder {
                 nodeDraft.ownerId(),
                 nodeDraft.source(),
                 nodeDraft.modifiers(),
-                nodeDraft.annotations()
+                nodeDraft.annotations(),
+                nodeDraft.tags(),
+                nodeDraft.attributes()
         );
     }
 }

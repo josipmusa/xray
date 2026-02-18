@@ -9,10 +9,7 @@ import com.xray.model.Meta;
 import com.xray.model.ParsePipelineResult;
 import com.xray.model.ParseProblem;
 import com.xray.model.SchemaVersion;
-import com.xray.parse.AstIndex;
-import com.xray.parse.NodeBuilder;
-import com.xray.parse.ParsePipeline;
-import com.xray.parse.RepoScanner;
+import com.xray.parse.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -39,7 +36,7 @@ public final class Engine {
 
         try (Stream<Path> files = RepoScanner.findJavaFiles(engineConfig)) {
             ParsePipelineResult parsePipelineResult = parsePipeline.parseAll(files);
-            AstIndex astIndex = parsePipelineResult.astIndex();
+            AstIndex astIndex = EntrypointDetector.annotateEntrypoints(parsePipelineResult.astIndex());
 
             long nodesWritten = writeNodes(astIndex, outputLayout);
 

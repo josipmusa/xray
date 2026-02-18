@@ -51,6 +51,10 @@ public final class AstIndex {
         nodeDrafts.put(nodeId, draft);
     }
 
+    void updateDraft(String nodeId, NodeDraft updated) {
+        nodeDrafts.put(nodeId, updated);
+    }
+
 
     public record NodeDraft(
             String id,
@@ -61,6 +65,8 @@ public final class AstIndex {
             String ownerId,
             SourceRange source,
             List<String> annotations,
-            List<String> modifiers
+            List<String> modifiers,
+            List<String> tags,
+            Map<String, Object> attributes
     ) {}
 }

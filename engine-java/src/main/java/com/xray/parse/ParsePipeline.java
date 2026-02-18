@@ -106,7 +106,9 @@ public final class ParsePipeline {
                     null,
                     classSourceRange,
                     classAnnotations,
-                    classModifiers
+                    classModifiers,
+                    null,
+                    null
             );
 
             astIndex.indexType(classFqn, className, classId, classDraft);
@@ -132,7 +134,9 @@ public final class ParsePipeline {
                         classId,
                         sourceRange(file, m),
                         methodAnnotations,
-                        methodModifiers
+                        methodModifiers,
+                        null,
+                        null
                 );
 
                 astIndex.indexMethod(methodKey, methodId, methodDraft);

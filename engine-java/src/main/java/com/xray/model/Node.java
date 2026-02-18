@@ -48,13 +48,15 @@ public record Node(
             String ownerId,
             SourceRange source,
             List<String> modifiers,
-            List<String> annotations) {
+            List<String> annotations,
+            List<String> tags,
+            Map<String, Object> attributes) {
         List<AnnotationRef> annotationRefs = annotations.stream()
                 .map(a -> new AnnotationRef(a, null))
                 .toList();
         return new Node(
                 id, kind, name, fqcn, signature, ownerId, source,
-                modifiers, annotationRefs, List.of(), Map.of(),
+                modifiers, annotationRefs, tags, attributes,
                 null,
                 SchemaVersion.V1
         );
