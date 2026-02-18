@@ -2,17 +2,20 @@ package com.xray.parse;
 
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParseResult;
+import com.github.javaparser.Problem;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.nodeTypes.NodeWithRange;
 import com.xray.model.ParsePipelineResult;
+import com.xray.model.ParseProblem;
 import com.xray.model.SourceRange;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -30,11 +33,12 @@ public final class ParsePipeline {
 
     public ParsePipelineResult parseAll(Stream<Path> files) {
         AstIndex astIndex = new AstIndex();
+        List<ParseProblem> parseProblems = new ArrayList<>();
         ParseStats stats = new ParseStats();
 
         //Explicit sequential - maybe will be swapped to parallel later
         files.sequential().forEach(file -> {
-            ParseStatus parseStatus = parseFile(file, astIndex);
+            ParseStatus parseStatus = parseFile(file, astIndex, parseProblems);
             stats.add(parseStatus);
         });
 
@@ -42,24 +46,41 @@ public final class ParsePipeline {
                 astIndex,
                 stats.total,
                 stats.ok,
-                stats.parseFailed
+                stats.parseFailed,
+                parseProblems
         );
     }
 
     /**
-     * MUTATES AstIndex
+     * MUTATES AstIndex and ParseProblem
      */
-    private ParseStatus parseFile(Path file, AstIndex astIndex) {
+    private ParseStatus parseFile(Path file, AstIndex astIndex, List<ParseProblem> parseProblems) {
         ParseResult<CompilationUnit> result;
         try {
             result = javaParser.parse(file);
-        } catch (IOException e) {
-            log.error("Skipping file - IO error reading {}, error message {}", file, e.getMessage());
+        } catch (IOException | RuntimeException e) {
+            log.error("Skipping file - Error reading {}, error message {}", file, e.getMessage());
+            parseProblems.add(ParseProblem.error(file.toString(), e.getMessage()));
             return ParseStatus.PARSE_FAILED;
         }
 
         if (result.getResult().isEmpty() || !result.isSuccessful()) {
+            for (Problem problem : result.getProblems()) {
+                parseProblems.add(ParseProblem.error(file.toString(), problem.getMessage(),
+                        problem.getLocation().flatMap(l -> l.getBegin().getRange().map(r -> r.begin.line)).orElse(null),
+                        problem.getLocation().flatMap(l -> l.getBegin().getRange().map(r -> r.begin.column)).orElse(null))
+                );
+            }
             return ParseStatus.PARSE_FAILED;
+        }
+
+        if (result.isSuccessful() && !result.getProblems().isEmpty()) {
+            for (Problem problem : result.getProblems()) {
+                parseProblems.add(ParseProblem.warn(file.toString(), problem.getMessage(),
+                        problem.getLocation().flatMap(l -> l.getBegin().getRange().map(r -> r.begin.line)).orElse(null),
+                        problem.getLocation().flatMap(l -> l.getBegin().getRange().map(r -> r.begin.column)).orElse(null))
+                );
+            }
         }
         CompilationUnit compilationUnit = result.getResult().get();
         astIndex.putCompilationUnit(file, compilationUnit);

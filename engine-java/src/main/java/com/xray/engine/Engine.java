@@ -7,6 +7,7 @@ import com.xray.io.JsonlWriter;
 import com.xray.io.OutputLayout;
 import com.xray.model.Meta;
 import com.xray.model.ParsePipelineResult;
+import com.xray.model.ParseProblem;
 import com.xray.model.SchemaVersion;
 import com.xray.parse.AstIndex;
 import com.xray.parse.NodeBuilder;
@@ -42,20 +43,31 @@ public final class Engine {
 
             long nodesWritten = writeNodes(astIndex, outputLayout);
 
+            writeProblems(parsePipelineResult.parseProblems(), outputLayout);
             writeMeta(parsePipelineResult, nodesWritten, engineConfig, outputLayout);
+        }
+    }
+
+    private void writeProblems(List<ParseProblem> parseProblems, OutputLayout outputLayout) throws IOException {
+        if (parseProblems.isEmpty()) return;
+        try (JsonlWriter writer = new JsonlWriter(outputLayout.getParseProblems(), objectMapper)) {
+            for (ParseProblem parseProblem : parseProblems) {
+                writer.writeObject(parseProblem);
+            }
         }
     }
 
     private long writeNodes(AstIndex astIndex, OutputLayout outputLayout) throws IOException {
         Map<String, List<String>> nameToIds = new HashMap<>();
         Map<String, List<String>> fileToIds = new HashMap<>();
-        try (JsonlWriter nodeWriter = new JsonlWriter(outputLayout.getNodesJsonl(), objectMapper)) {
+        try (JsonlWriter nodeWriter = new JsonlWriter(outputLayout.getNodes(), objectMapper)) {
             long nodesWritten = NodeBuilder.buildNodes(astIndex)
                     .map(node -> {
                         try {
                             nodeWriter.writeObject(node);
                             nameToIds.computeIfAbsent(node.name(), k -> new ArrayList<>()).add(node.id());
-                            nameToIds.computeIfAbsent(node.fqcn(), k -> new ArrayList<>()).add(node.id()); //TODO maybe add lowercase key here also for UI improvements
+                            nameToIds.computeIfAbsent(node.name().toLowerCase(), k -> new ArrayList<>()).add(node.id());
+                            nameToIds.computeIfAbsent(node.fqcn(), k -> new ArrayList<>()).add(node.id());
                             fileToIds.computeIfAbsent(node.source().file(), k -> new ArrayList<>()).add(node.id());
                             return true;
                         } catch (IOException e) {
@@ -90,6 +102,6 @@ public final class Engine {
                 stats
         );
 
-        objectMapper.writerWithDefaultPrettyPrinter().writeValue(outputLayout.getMetaJson().toFile(), meta);
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(outputLayout.getMeta().toFile(), meta);
     }
 }
