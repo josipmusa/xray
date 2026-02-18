@@ -1,0 +1,28 @@
+{
+  "name": "xray",
+  "version": "0.0.1",
+  "type": "module",
+  "bin": {
+    "xray": "dist/index.cjs"
+  },
+  "files": [
+    "dist",
+    "assets"
+  ],
+  "scripts": {
+    "build": "node ./build.mjs",
+    "bundle": "npm run build:all && node ./bundle.mjs",
+    "build:all": "npm run build -w @xray/server && npm run build -w @xray/ui && npm run build:engine && npm run build",
+    "build:engine": "cd ../../engine-java && ./mvnw -q -DskipTests package",
+    "clean": "rm -rf dist assets"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "open": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.3",
+    "esbuild": "^0.25.12",
+    "typescript": "^5.9.3"
+  }
+}

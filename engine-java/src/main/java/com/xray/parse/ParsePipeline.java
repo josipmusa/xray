@@ -1,0 +1,150 @@
+package com.xray.parse;
+
+import com.github.javaparser.JavaParser;
+import com.github.javaparser.ParseResult;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.expr.AnnotationExpr;
+import com.github.javaparser.ast.nodeTypes.NodeWithRange;
+import com.xray.model.ParsePipelineResult;
+import com.xray.model.SourceRange;
+import lombok.extern.slf4j.Slf4j;
+
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.stream.Stream;
+
+import static com.xray.model.Enums.*;
+
+@Slf4j
+public final class ParsePipeline {
+
+    private final JavaParser javaParser;
+
+    public ParsePipeline(JavaParser javaParser) {
+        this.javaParser = javaParser;
+    }
+
+
+    public ParsePipelineResult parseAll(Stream<Path> files) {
+        AstIndex astIndex = new AstIndex();
+        ParseStats stats = new ParseStats();
+
+        //Explicit sequential - maybe will be swapped to parallel later
+        files.sequential().forEach(file -> {
+            ParseStatus parseStatus = parseFile(file, astIndex);
+            stats.add(parseStatus);
+        });
+
+        return new ParsePipelineResult(
+                astIndex,
+                stats.total,
+                stats.ok,
+                stats.parseFailed
+        );
+    }
+
+    /**
+     * MUTATES AstIndex
+     */
+    private ParseStatus parseFile(Path file, AstIndex astIndex) {
+        ParseResult<CompilationUnit> result;
+        try {
+            result = javaParser.parse(file);
+        } catch (IOException e) {
+            log.error("Skipping file - IO error reading {}, error message {}", file, e.getMessage());
+            return ParseStatus.PARSE_FAILED;
+        }
+
+        if (result.getResult().isEmpty() || !result.isSuccessful()) {
+            return ParseStatus.PARSE_FAILED;
+        }
+        CompilationUnit compilationUnit = result.getResult().get();
+        astIndex.putCompilationUnit(file, compilationUnit);
+
+        for (ClassOrInterfaceDeclaration c : compilationUnit.findAll(ClassOrInterfaceDeclaration.class)) {
+            String className = c.getNameAsString();
+            String classFqn = c.getFullyQualifiedName().orElse(className);
+            String classId = classFqn;
+            List<String> classModifiers = c.getModifiers().stream()
+                    .map((m -> m.getKeyword().asString()))
+                    .toList();
+            List<String> classAnnotations = c.getAnnotations().stream()
+                    .map(AnnotationExpr::getNameAsString)
+                    .toList();
+            SourceRange classSourceRange = sourceRange(file, c);
+
+            AstIndex.NodeDraft classDraft = new AstIndex.NodeDraft(
+                    classId,
+                    NodeKind.CLASS,
+                    className,
+                    classFqn,
+                    null,
+                    null,
+                    classSourceRange,
+                    classAnnotations,
+                    classModifiers
+            );
+
+            astIndex.indexType(classFqn, className, classId, classDraft);
+
+            for (MethodDeclaration m : c.getMethods()) {
+                String methodName = m.getNameAsString();
+
+                String methodKey = MethodKeys.keyFor(classFqn, m);
+                String methodId = methodKey;
+                List<String> methodModifiers = m.getModifiers().stream()
+                        .map((modifier -> modifier.getKeyword().asString()))
+                        .toList();
+                List<String> methodAnnotations = m.getAnnotations().stream()
+                        .map(AnnotationExpr::getNameAsString)
+                        .toList();
+
+                AstIndex.NodeDraft methodDraft = new AstIndex.NodeDraft(
+                        methodId, //use methodKey as nodeId
+                        NodeKind.METHOD,
+                        methodName,
+                        classFqn,
+                        MethodKeys.prettySignature(m),
+                        classId,
+                        sourceRange(file, m),
+                        methodAnnotations,
+                        methodModifiers
+                );
+
+                astIndex.indexMethod(methodKey, methodId, methodDraft);
+            }
+        }
+
+        return ParseStatus.OK;
+    }
+
+    private enum ParseStatus {
+        OK,
+        PARSE_FAILED
+    }
+
+    private static final class ParseStats {
+        long total;
+        long ok;
+        long parseFailed;
+
+        void add(ParseStatus s) {
+            total++;
+            switch (s) {
+                case OK -> ok++;
+                case PARSE_FAILED -> parseFailed++;
+            }
+        }
+    }
+
+    private static SourceRange sourceRange(Path file, NodeWithRange<?> node) {
+        int startLine = node.getBegin().map(p -> p.line).orElse(-1);
+        int startCol = node.getBegin().map(p -> p.column).orElse(-1);
+        int endLine = node.getEnd().map(p -> p.line).orElse(-1);
+        int endCol = node.getEnd().map(p -> p.column).orElse(-1);
+        return new SourceRange(file.toString(), startLine, startCol, endLine, endCol);
+    }
+}

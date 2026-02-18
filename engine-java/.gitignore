@@ -1,0 +1,74 @@
+############################
+# Maven
+############################
+/target/
+*.log
+*.tmp
+
+############################
+# Executable / shaded jars
+############################
+*.jar
+!*.jar.original
+dependency-reduced-pom.xml
+
+############################
+# Java
+############################
+*.class
+hs_err_pid*
+
+############################
+# Lombok
+############################
+# Lombok delombok output (if ever used)
+.delombok/
+
+############################
+# IDEs
+############################
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# VS Code
+.vscode/
+
+# Eclipse
+.classpath
+.project
+.settings/
+
+# NetBeans
+nbproject/
+build/
+nbbuild/
+dist/
+nbdist/
+.nb-gradle/
+
+############################
+# OS
+############################
+
+# macOS
+.DS_Store
+
+# Linux
+*~
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+############################
+# Misc
+############################
+.env
+.env.*
+.xray

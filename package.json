@@ -1,0 +1,15 @@
+{
+  "name": "xray-workspace",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm -ws run build",
+    "bundle": "npm run bundle -w xray",
+    "clean": "npm -ws run clean"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
