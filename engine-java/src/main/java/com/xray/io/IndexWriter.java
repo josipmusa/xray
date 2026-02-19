@@ -1,6 +1,7 @@
 package com.xray.io;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.xray.model.EntrypointIndex;
 import com.xray.model.Node;
 import lombok.RequiredArgsConstructor;
 
@@ -32,9 +33,16 @@ public final class IndexWriter {
     }
 
     /**
+     * Writes entrypoints.json
+     */
+    public void writeEntrypoints(OutputLayout layout, EntrypointIndex entrypoints) throws IOException {
+        writeIndex(layout.getIndexDir().resolve("entrypoints.json"), entrypoints);
+    }
+
+    /**
      * Generic index writer (pretty-printed on purpose, these files are small)
      */
-    private void writeIndex(Path file, Map<String, List<String>> index) throws IOException {
+    private void writeIndex(Path file, Object index) throws IOException {
         Files.createDirectories(file.getParent());
 
         byte[] json = objectMapper

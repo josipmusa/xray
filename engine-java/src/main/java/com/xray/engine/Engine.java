@@ -5,11 +5,10 @@ import com.xray.config.EngineConfig;
 import com.xray.io.IndexWriter;
 import com.xray.io.JsonlWriter;
 import com.xray.io.OutputLayout;
-import com.xray.model.Meta;
-import com.xray.model.ParsePipelineResult;
-import com.xray.model.ParseProblem;
-import com.xray.model.SchemaVersion;
+import com.xray.model.*;
 import com.xray.parse.*;
+import com.xray.spring.BeanDetector;
+import com.xray.spring.EntrypointDetector;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -22,12 +21,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
-@RequiredArgsConstructor
 @Slf4j
 public final class Engine {
 
     private final ParsePipeline parsePipeline;
     private final ObjectMapper objectMapper;
+    private final IndexWriter indexWriter;
+
+    public Engine(ParsePipeline parsePipeline, ObjectMapper objectMapper) {
+        this.parsePipeline = parsePipeline;
+        this.objectMapper = objectMapper;
+        this.indexWriter = new IndexWriter(objectMapper);
+    }
 
     public void analyze(EngineConfig engineConfig) throws IOException {
         OutputLayout outputLayout = new OutputLayout(engineConfig.outputDir());
@@ -36,9 +41,12 @@ public final class Engine {
 
         try (Stream<Path> files = RepoScanner.findJavaFiles(engineConfig)) {
             ParsePipelineResult parsePipelineResult = parsePipeline.parseAll(files);
-            AstIndex astIndex = EntrypointDetector.annotateEntrypoints(parsePipelineResult.astIndex());
+            AstIndex astIndex = parsePipelineResult.astIndex();
+            EntrypointIndex entrypointIndex = EntrypointDetector.annotateEntrypoints(astIndex);
+            BeanDetector.annotateBeans(astIndex);
 
             long nodesWritten = writeNodes(astIndex, outputLayout);
+            indexWriter.writeEntrypoints(outputLayout, entrypointIndex);
 
             writeProblems(parsePipelineResult.parseProblems(), outputLayout);
             writeMeta(parsePipelineResult, nodesWritten, engineConfig, outputLayout);
@@ -75,7 +83,6 @@ public final class Engine {
                     .filter(Boolean::booleanValue)
                     .count();
 
-            IndexWriter indexWriter = new IndexWriter(objectMapper);
             indexWriter.writeNameToIds(outputLayout, nameToIds);
             indexWriter.writeFileToIds(outputLayout, fileToIds);
 

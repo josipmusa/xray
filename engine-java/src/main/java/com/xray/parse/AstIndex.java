@@ -13,11 +13,11 @@ public final class AstIndex {
     private final Map<Path, CompilationUnit> fileToCu;
 
     // Type inventory / resolution helpers
-    private final Map<String, String> fqcnToTypeId;       // "com.a.Foo" -> nodeId
+    private final Map<String, String> fqcnToNodeId;       // "com.a.Foo" -> nodeId
     private final Map<String, List<String>> simpleNameToFqcns; // "Foo" -> ["com.a.Foo", "com.b.Foo"]
 
     // Method inventory / lookup
-    private final Map<String, String> methodKeyToMethodId; // "com.a.Foo#bar(java.lang.String):void" -> nodeId
+    private final Map<String, String> methodKeyToNodeId; // "com.a.Foo#bar(java.lang.String):void" -> nodeId
 
     // Node source lookup (for building nodes later without holding Node objects)
     private final Map<String, NodeDraft> nodeDrafts; // nodeId -> draft data
@@ -25,33 +25,33 @@ public final class AstIndex {
 
     public AstIndex() {
         this.fileToCu = new HashMap<>();
-        this.fqcnToTypeId = new HashMap<>();
+        this.fqcnToNodeId = new HashMap<>();
         this.simpleNameToFqcns = new HashMap<>();
-        this.methodKeyToMethodId = new HashMap<>();
+        this.methodKeyToNodeId = new HashMap<>();
         this.nodeDrafts = new HashMap<>();
     }
 
     public Map<Path, CompilationUnit> fileToCu() { return Collections.unmodifiableMap(fileToCu); }
-    public Map<String, String> fqcnToTypeId() { return Collections.unmodifiableMap(fqcnToTypeId); }
+    public Map<String, String> fqcnToNodeId() { return Collections.unmodifiableMap(fqcnToNodeId); }
     public Map<String, List<String>> simpleNameToFqcns() { return Collections.unmodifiableMap(simpleNameToFqcns); }
-    public Map<String, String> methodKeyToMethodId() { return Collections.unmodifiableMap(methodKeyToMethodId); }
+    public Map<String, String> methodKeyToNodeId() { return Collections.unmodifiableMap(methodKeyToNodeId); }
     public Map<String, NodeDraft> nodeDrafts() { return Collections.unmodifiableMap(nodeDrafts); }
 
     // Mutators used by ParsePipeline only:
     void putCompilationUnit(Path file, CompilationUnit cu) { fileToCu.put(file, cu); }
 
     void indexType(String fqcn, String simpleName, String nodeId, NodeDraft draft) {
-        fqcnToTypeId.put(fqcn, nodeId);
+        fqcnToNodeId.put(fqcn, nodeId);
         simpleNameToFqcns.computeIfAbsent(simpleName, k -> new ArrayList<>()).add(fqcn);
         nodeDrafts.put(nodeId, draft);
     }
 
     void indexMethod(String methodKey, String nodeId, NodeDraft draft) {
-        methodKeyToMethodId.put(methodKey, nodeId);
+        methodKeyToNodeId.put(methodKey, nodeId);
         nodeDrafts.put(nodeId, draft);
     }
 
-    void updateDraft(String nodeId, NodeDraft updated) {
+    public void updateDraft(String nodeId, NodeDraft updated) {
         nodeDrafts.put(nodeId, updated);
     }
 

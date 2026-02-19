@@ -88,7 +88,7 @@ public final class ParsePipeline {
         for (ClassOrInterfaceDeclaration c : compilationUnit.findAll(ClassOrInterfaceDeclaration.class)) {
             String className = c.getNameAsString();
             String classFqn = c.getFullyQualifiedName().orElse(className);
-            String classId = classFqn;
+            String classId = NodeIdGenerator.generateClassNodeId(c);
             List<String> classModifiers = c.getModifiers().stream()
                     .map((m -> m.getKeyword().asString()))
                     .toList();
@@ -116,7 +116,7 @@ public final class ParsePipeline {
             for (MethodDeclaration m : c.getMethods()) {
                 String methodName = m.getNameAsString();
 
-                String methodKey = MethodKeys.keyFor(classFqn, m);
+                String methodKey = NodeIdGenerator.generateMethodNodeId(classFqn, m);
                 String methodId = methodKey;
                 List<String> methodModifiers = m.getModifiers().stream()
                         .map((modifier -> modifier.getKeyword().asString()))
@@ -130,7 +130,7 @@ public final class ParsePipeline {
                         NodeKind.METHOD,
                         methodName,
                         classFqn,
-                        MethodKeys.prettySignature(m),
+                        NodeIdGenerator.prettySignature(m),
                         classId,
                         sourceRange(file, m),
                         methodAnnotations,

@@ -1,6 +1,7 @@
 package com.xray.parse;
 
 import com.xray.model.Enums;
+import com.xray.spring.EntrypointDetector;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -141,7 +142,8 @@ class EntrypointDetectorTest {
 
     private AstIndex detect(String source, String fileName) throws IOException {
         AstIndex astIndex = parse(source, fileName);
-        return EntrypointDetector.annotateEntrypoints(astIndex);
+        EntrypointDetector.annotateEntrypoints(astIndex);
+        return astIndex;
     }
 
     private AstIndex parse(String source, String fileName) throws IOException {
