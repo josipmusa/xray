@@ -1,113 +1,172 @@
 package com.xray.spring;
 
+import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MemberValuePair;
+import com.xray.model.SpringBeanAnnotationAttributes;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import java.beans.Introspector;
+import java.util.*;
+import java.util.function.Supplier;
 
 public final class AnnotationHelper {
 
-    private AnnotationHelper() {}
+    public static final String VALUE_ATTRIBUTE_NAME = "value";
+    @SuppressWarnings("StaticCollection")
+    private static final Set<String> HTTP_METHODS = Set.of(
+            "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE"
+    );
 
-    static Optional<AnnotationExpr> findAnnotation(List<AnnotationExpr> annotations, String annotationName) {
-        for (AnnotationExpr annotation : annotations) {
-            String foundName = annotation.getNameAsString();
-            if (foundName.equals(annotationName) || foundName.endsWith("." + annotationName)) {
-                return Optional.of(annotation);
-            }
-        }
-        return Optional.empty();
+    private AnnotationHelper() {
     }
 
-    static List<String> extractRequestMappingMethods(AnnotationExpr annotation) {
-        if (!annotation.isNormalAnnotationExpr()) {
-            return List.of();
-        }
+    // ---------- Public-ish helpers ----------
 
-        List<String> methods = new ArrayList<>();
-        for (MemberValuePair pair : annotation.asNormalAnnotationExpr().getPairs()) {
-            if (!pair.getNameAsString().equals("method")) {
-                continue;
-            }
-            extractRequestMethodsFromExpression(pair.getValue(), methods);
-        }
+    static Optional<AnnotationExpr> findAnnotation(List<AnnotationExpr> annotations, String annotationSimpleName) {
+        return annotations.stream()
+                .filter(a -> simpleName(a).equals(annotationSimpleName))
+                .findFirst();
+    }
 
-        return methods.stream()
-                .map(String::toUpperCase)
-                .filter(method -> method.equals("GET")
-                        || method.equals("POST")
-                        || method.equals("PUT")
-                        || method.equals("DELETE")
-                        || method.equals("PATCH")
-                        || method.equals("HEAD")
-                        || method.equals("OPTIONS")
-                        || method.equals("TRACE"))
+    static List<String> extractRequestMappingPaths(AnnotationExpr requestMapping) {
+        // Spring supports both "value" and "path". If both exist, treat them as additive.
+        List<String> out = new ArrayList<>();
+
+        out.addAll(extractAttributeValues(requestMapping, VALUE_ATTRIBUTE_NAME, List::of));
+        out.addAll(extractAttributeValues(requestMapping, "path", List::of));
+
+        // @RequestMapping("/users") (single-member) is already handled by "value" above.
+        // But our extractAttributeValues only treats single-member as "value", so we're good.
+
+        // Remove blanks/dupes while preserving order.
+        return out.stream()
+                .filter(s -> s != null && !s.isBlank())
                 .distinct()
                 .toList();
     }
 
-    static List<String> extractRequestMappingPaths(AnnotationExpr annotation) {
-        List<String> paths = new ArrayList<>();
+    static List<String> extractRequestMappingMethods(AnnotationExpr requestMapping) {
+        // Typically: method = RequestMethod.GET or method = {RequestMethod.GET, ...}
+        List<String> raw = extractAttributeValues(requestMapping, "method", List::of);
 
-        // @RequestMapping("/users")
-        if (annotation.isSingleMemberAnnotationExpr()) {
-            extractFromExpression(
-                    annotation.asSingleMemberAnnotationExpr().getMemberValue(),
-                    paths
-            );
-        }
+        return raw.stream()
+                .map(AnnotationHelper::extractEnumConstantName) // "RequestMethod.GET" -> "GET"
+                .map(String::toUpperCase)
+                .filter(HTTP_METHODS::contains)
+                .distinct()
+                .toList();
+    }
 
-        // @RequestMapping(value = "/users") or path = "/users"
-        if (annotation.isNormalAnnotationExpr()) {
-            for (MemberValuePair pair :
-                    annotation.asNormalAnnotationExpr().getPairs()) {
+    static SpringBeanAnnotationAttributes extractSpringBeanClassAttributes(ClassOrInterfaceDeclaration clazz, AnnotationExpr componentAnnotation) {
+        String declaredType = clazz.getFullyQualifiedName().orElse(clazz.getNameAsString());
 
-                String name = pair.getNameAsString();
-                if (name.equals("value") || name.equals("path")) {
-                    extractFromExpression(pair.getValue(), paths);
-                }
+        SpringBeanAnnotationAttributes.SpringBeanAnnotationAttributesBuilder b =
+                SpringBeanAnnotationAttributes.builder()
+                        .source("component")
+                        .declaredType(declaredType)
+                        .beanName(beanNameFromStereotype(clazz, componentAnnotation));
+
+        for (AnnotationExpr a : clazz.getAnnotations()) {
+            switch (simpleName(a)) {
+                case "Primary" -> // @Primary has no meaningful value; treat presence as true
+                        b.primary(true);
+                case "Qualifier" -> b.qualifier(extractAttributeValues(a, VALUE_ATTRIBUTE_NAME, List::of));
+                case "Scope" -> b.scope(firstAttr(a, VALUE_ATTRIBUTE_NAME));
+                case "Profile" -> b.profile(extractAttributeValues(a, VALUE_ATTRIBUTE_NAME, List::of));
+                case "Conditional" -> b.conditional(true);
+                default -> { /* ignore */ }
             }
         }
 
-        return paths;
+        return b.build();
     }
 
-    static void extractFromExpression(Expression expr, List<String> out) {
+    // ---------- Core extraction logic ----------
 
-        // "/users"
-        if (expr.isStringLiteralExpr()) {
-            out.add(expr.asStringLiteralExpr().getValue());
-            return;
+    private static List<String> extractAttributeValues(
+            AnnotationExpr annotation,
+            String attributeName,
+            Supplier<List<String>> inferredDefault
+    ) {
+        Objects.requireNonNull(annotation, "annotation");
+        Objects.requireNonNull(attributeName, "attributeName");
+        Objects.requireNonNull(inferredDefault, "inferredDefault");
+
+        Optional<Expression> attrExpr = Optional.empty();
+
+        if (annotation.isSingleMemberAnnotationExpr() && VALUE_ATTRIBUTE_NAME.equals(attributeName)) {
+            attrExpr = Optional.of(annotation.asSingleMemberAnnotationExpr().getMemberValue());
+        } else if (annotation.isNormalAnnotationExpr()) {
+            attrExpr = annotation.asNormalAnnotationExpr().getPairs().stream()
+                    .filter(p -> attributeName.equals(p.getNameAsString()))
+                    .map(MemberValuePair::getValue)
+                    .findFirst();
         }
 
-        // {"/a", "/b"}
+        return attrExpr.map(expr -> toStringList(expr, inferredDefault))
+                .orElseGet(inferredDefault);
+    }
+
+    // ---------- Private helpers ----------
+
+    private static String beanNameFromStereotype(ClassOrInterfaceDeclaration clazz, AnnotationExpr stereotype) {
+        // stereotype value="" is treated as "no explicit name" -> inferred
+        List<String> v = extractAttributeValues(stereotype, VALUE_ATTRIBUTE_NAME,
+                () -> List.of(Introspector.decapitalize(clazz.getNameAsString()))
+        );
+
+        // Ensure we still fall back if the explicit value was "" or blank
+        String first = v.isEmpty() ? null : v.getFirst();
+        if (first == null || first.isBlank()) {
+            return Introspector.decapitalize(clazz.getNameAsString());
+        }
+        return first;
+    }
+
+    private static String firstAttr(AnnotationExpr a, String attr) {
+        List<String> v = extractAttributeValues(a, attr, Collections::emptyList);
+        if (v.isEmpty()) return null;
+        String first = v.getFirst();
+        return (first == null || first.isBlank()) ? null : first;
+    }
+
+    private static List<String> toStringList(Expression expr, Supplier<List<String>> inferredDefault) {
+        if (expr == null) return inferredDefault.get();
+
         if (expr.isArrayInitializerExpr()) {
-            for (Expression e : expr.asArrayInitializerExpr().getValues()) {
-                extractFromExpression(e, out);
-            }
+            List<String> out = expr.asArrayInitializerExpr().getValues().stream()
+                    .map(AnnotationHelper::asBestEffortString)
+                    .filter(Objects::nonNull)
+                    .toList();
+            return out.isEmpty() ? inferredDefault.get() : out;
         }
+
+        String single = asBestEffortString(expr);
+        if (single == null || single.isBlank()) return inferredDefault.get();
+        return List.of(single);
     }
 
-    private static void extractRequestMethodsFromExpression(Expression expr, List<String> out) {
-        if (expr.isArrayInitializerExpr()) {
-            for (Expression child : expr.asArrayInitializerExpr().getValues()) {
-                extractRequestMethodsFromExpression(child, out);
-            }
-            return;
-        }
+    private static String asBestEffortString(Expression e) {
+        if (e == null) return null;
+        if (e.isStringLiteralExpr()) return e.asStringLiteralExpr().getValue();
 
-        if (expr.isFieldAccessExpr()) {
-            out.add(expr.asFieldAccessExpr().getNameAsString());
-            return;
-        }
+        // Common for RequestMethod.X, etc. Keep as source text for later resolution.
+        if (e.isFieldAccessExpr()) return e.asFieldAccessExpr().toString();
+        if (e.isNameExpr()) return e.asNameExpr().getNameAsString();
 
-        if (expr.isNameExpr()) {
-            out.add(expr.asNameExpr().getNameAsString());
-        }
+        return e.toString();
     }
 
+    private static String extractEnumConstantName(String raw) {
+        if (raw == null) return "";
+        int idx = raw.lastIndexOf('.');
+        return idx >= 0 ? raw.substring(idx + 1) : raw;
+    }
 
+    private static String simpleName(AnnotationExpr a) {
+        String name = a.getNameAsString();
+        int idx = name.lastIndexOf('.');
+        return idx >= 0 ? name.substring(idx + 1) : name;
+    }
 }

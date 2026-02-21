@@ -3,6 +3,7 @@ package com.xray.spring;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.expr.AnnotationExpr;
+import com.xray.model.SpringBeanAnnotationAttributes;
 import com.xray.parse.AstIndex;
 import com.xray.parse.NodeIdGenerator;
 
@@ -11,16 +12,7 @@ import java.util.*;
 
 public final class BeanDetector {
 
-    private static final String SPRING_COMPONENT_SOURCE_ATTRIBUTE = "spring.source";
-    private static final String SPRING_DECLARED_TYPE_ATTRIBUTE = "spring.declaredType";
-    //TODO finish attribute mapping
-    private static final String SPRING_BEAN_NAME_EXPLICIT_ATTRIBUTE = "spring.beanName.explicit";
-    private static final String SPRING_OWNER_ATTRIBUTE = "spring.owner";
-    private static final String SPRING_PRIMARY_ATTRIBUTE = "spring.primary";
-    private static final String SPRING_QUALIFIER_ATTRIBUTE = "spring.qualifier";
-    private static final String SPRING_PROFILE_ATTRIBUTE = "spring.profile";
-    private static final String SPRING_CONDITIONAL_ATTRIBUTE = "spring.conditional";
-
+    //TODO method mapping
     public static void annotateBeans(AstIndex astIndex) {
         for (Map.Entry<Path, CompilationUnit> pathToCompilationUnit : astIndex.fileToCu().entrySet()) {
             CompilationUnit compilationUnit = pathToCompilationUnit.getValue();
@@ -62,13 +54,13 @@ public final class BeanDetector {
         astIndex.updateDraft(nodeId, updatedClassDraft);
     }
 
-    private static Map<String, Object> mergeClassAttributes(AstIndex.NodeDraft existingClassDraft, ClassOrInterfaceDeclaration clazz, AnnotationExpr annotation) {
+    private static Map<String, Object> mergeClassAttributes(AstIndex.NodeDraft existingClassDraft, ClassOrInterfaceDeclaration clazz, AnnotationExpr componentAnnotation) {
         Map<String, Object> mergedAttributes = new HashMap<>();
         if (existingClassDraft.attributes() != null) {
             mergedAttributes.putAll(existingClassDraft.attributes());
         }
-        mergedAttributes.put(SPRING_COMPONENT_SOURCE_ATTRIBUTE, "component");
-        mergedAttributes.put(SPRING_DECLARED_TYPE_ATTRIBUTE, clazz.getFullyQualifiedName().orElse(clazz.getNameAsString()));
+        SpringBeanAnnotationAttributes springBeanAnnotationAttributes = AnnotationHelper.extractSpringBeanClassAttributes(clazz, componentAnnotation);
+        mergedAttributes.putAll(springBeanAnnotationAttributes.toNodeAttributes());
 
         return mergedAttributes;
     }

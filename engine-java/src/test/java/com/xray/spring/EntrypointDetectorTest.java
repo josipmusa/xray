@@ -1,7 +1,9 @@
-package com.xray.parse;
+package com.xray.spring;
 
 import com.xray.model.Enums;
-import com.xray.spring.EntrypointDetector;
+import com.xray.parse.AstIndex;
+import com.xray.parse.JavaParserFactory;
+import com.xray.parse.ParsePipeline;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -23,10 +25,10 @@ class EntrypointDetectorTest {
         AstIndex astIndex = detect(
                 """
                         @RestController
-                        @RequestMapping(\"/api\")
+                        @RequestMapping("/api")
                         class DemoController {
-                            @GetMapping(\"/users\")
-                            String listUsers() { return \"ok\"; }
+                            @GetMapping("/users")
+                            String listUsers() { return "ok"; }
                         }
                         """,
                 "DemoController.java"
@@ -50,8 +52,8 @@ class EntrypointDetectorTest {
                 """
                         @Controller
                         class DemoController {
-                            @RequestMapping(path = \"/submit\", method = RequestMethod.POST)
-                            String submit() { return \"ok\"; }
+                            @RequestMapping(path = "/submit", method = RequestMethod.POST)
+                            String submit() { return "ok"; }
                         }
                         """,
                 "ControllerRequestMethod.java"
@@ -70,8 +72,8 @@ class EntrypointDetectorTest {
                 """
                         @Controller
                         class DemoController {
-                            @RequestMapping(value = \"/items\", method = {RequestMethod.GET, RequestMethod.DELETE})
-                            String items() { return \"ok\"; }
+                            @RequestMapping(value = "/items", method = {RequestMethod.GET, RequestMethod.DELETE})
+                            String items() { return "ok"; }
                         }
                         """,
                 "ControllerMultiMethod.java"
@@ -89,8 +91,8 @@ class EntrypointDetectorTest {
                 """
                         @Controller
                         class DemoController {
-                            @RequestMapping(\"/search\")
-                            String search() { return \"ok\"; }
+                            @RequestMapping("/search")
+                            String search() { return "ok"; }
                         }
                         """,
                 "ControllerAnyMethod.java"
@@ -107,10 +109,10 @@ class EntrypointDetectorTest {
                 """
                         @RestController
                         class DemoController {
-                            @PostMapping(\"/p\") String post() { return \"ok\"; }
-                            @PutMapping(\"/u\") String put() { return \"ok\"; }
-                            @DeleteMapping(\"/d\") String delete() { return \"ok\"; }
-                            @PatchMapping(\"/pa\") String patch() { return \"ok\"; }
+                            @PostMapping("/p") String post() { return "ok"; }
+                            @PutMapping("/u") String put() { return "ok"; }
+                            @DeleteMapping("/d") String delete() { return "ok"; }
+                            @PatchMapping("/pa") String patch() { return "ok"; }
                         }
                         """,
                 "ControllerShortcutMethods.java"
@@ -127,8 +129,8 @@ class EntrypointDetectorTest {
         AstIndex astIndex = detect(
                 """
                         class NotAController {
-                            @GetMapping(\"/users\")
-                            String users() { return \"ok\"; }
+                            @GetMapping("/users")
+                            String users() { return "ok"; }
                         }
                         """,
                 "NotAController.java"
