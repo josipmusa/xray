@@ -19,6 +19,7 @@ public final class EdgePhase {
         this.outputLayout = outputLayout;
     }
 
+    //TODO Dependency Injection edges on component classes
     public void processEdges(AstIndex astIndex) throws IOException {
         try (JsonlWriter edgeWriter = new JsonlWriter(outputLayout.getEdges(), objectMapper)) {
             for (AstIndex.NodeDraft nodeDraft : astIndex.nodeDrafts().values()) {
