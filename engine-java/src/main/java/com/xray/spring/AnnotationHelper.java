@@ -1,6 +1,7 @@
 package com.xray.spring;
 
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MemberValuePair;
@@ -10,9 +11,11 @@ import java.beans.Introspector;
 import java.util.*;
 import java.util.function.Supplier;
 
-public final class AnnotationHelper {
+final class AnnotationHelper {
 
-    public static final String VALUE_ATTRIBUTE_NAME = "value";
+    private static final String VALUE_ATTRIBUTE_NAME = "value";
+    private static final String NAME_ATTRIBUTE_NAME  = "name";
+
     @SuppressWarnings("StaticCollection")
     private static final Set<String> HTTP_METHODS = Set.of(
             "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE"
@@ -82,6 +85,37 @@ public final class AnnotationHelper {
         return b.build();
     }
 
+    static SpringBeanAnnotationAttributes extractSpringBeanMethodAttributes(MethodDeclaration method, AnnotationExpr beanAnnotation, ClassOrInterfaceDeclaration clazz) {
+        String declaredType;
+        try {
+            declaredType = method.getType().resolve().describe();
+        } catch (Exception e) {
+            declaredType = method.getTypeAsString();
+        }
+
+        SpringBeanAnnotationAttributes.SpringBeanAnnotationAttributesBuilder b =
+                SpringBeanAnnotationAttributes.builder()
+                        .source("beanMethod")
+                        .declaredType(declaredType)
+                        .owner(clazz.getFullyQualifiedName().orElse(clazz.getNameAsString()))
+                        .beanName(beanNameFromBeanMethod(method, beanAnnotation));
+
+
+        for (AnnotationExpr a : method.getAnnotations()) {
+            switch (simpleName(a)) {
+                case "Primary" -> // @Primary has no meaningful value; treat presence as true
+                        b.primary(true);
+                case "Qualifier" -> b.qualifier(extractAttributeValues(a, VALUE_ATTRIBUTE_NAME, List::of));
+                case "Scope" -> b.scope(firstAttr(a, VALUE_ATTRIBUTE_NAME));
+                case "Profile" -> b.profile(extractAttributeValues(a, VALUE_ATTRIBUTE_NAME, List::of));
+                case "Conditional" -> b.conditional(true);
+                default -> { /* ignore */ }
+            }
+        }
+
+        return b.build();
+    }
+
     // ---------- Core extraction logic ----------
 
     private static List<String> extractAttributeValues(
@@ -109,6 +143,22 @@ public final class AnnotationHelper {
     }
 
     // ---------- Private helpers ----------
+
+    private static String beanNameFromBeanMethod(MethodDeclaration method, AnnotationExpr beanAnnotation) {
+        // Try @Bean(name=...), else @Bean(value=...) / @Bean("..."), else method name.
+        List<String> names = extractAttributeValues(beanAnnotation, NAME_ATTRIBUTE_NAME,
+                () -> extractAttributeValues(beanAnnotation, VALUE_ATTRIBUTE_NAME,
+                        () -> List.of(method.getNameAsString())
+                )
+        );
+
+        // Spring: empty/blank explicit name behaves like "not provided" -> infer default
+        String first = names.isEmpty() ? null : names.getFirst();
+        if (first == null || first.isBlank()) {
+            return method.getNameAsString();
+        }
+        return first;
+    }
 
     private static String beanNameFromStereotype(ClassOrInterfaceDeclaration clazz, AnnotationExpr stereotype) {
         // stereotype value="" is treated as "no explicit name" -> inferred

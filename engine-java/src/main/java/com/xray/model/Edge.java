@@ -1,6 +1,7 @@
 package com.xray.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.xray.util.Hashing;
 
 import java.util.List;
 import java.util.Map;
@@ -30,13 +31,18 @@ public record Edge(
         int version
 ) {
     public static Edge v1(
-            String id,
             String fromId,
             String toId,
             EdgeType type,
             Confidence confidence
     ) {
-        //TODO id generation via hash
+        String canonical =
+                "edge:v1:" +
+                        fromId + "|" +
+                        toId + "|" +
+                        type.name() + "|" +
+                        confidence.name();
+        String id = "e" + Hashing.sha256Hex(canonical);
         return new Edge(id, fromId, toId, type, confidence, List.of(), Map.of(), SchemaVersion.V1);
     }
 }

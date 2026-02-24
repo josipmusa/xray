@@ -8,6 +8,5 @@ public record ParsePipelineResult(
         AstIndex astIndex,
         long javaFilesFound,
         long filesParsedOk,
-        long filesParsedFailed,
-        List<ParseProblem> parseProblems) {
+        long filesParsedFailed) {
 }

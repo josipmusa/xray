@@ -1,5 +1,6 @@
 package com.xray.parse;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParseResult;
 import com.github.javaparser.Problem;
@@ -8,6 +9,9 @@ import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.nodeTypes.NodeWithRange;
+import com.xray.engine.NodeIdGenerator;
+import com.xray.io.JsonlWriter;
+import com.xray.io.OutputLayout;
 import com.xray.model.ParsePipelineResult;
 import com.xray.model.ParseProblem;
 import com.xray.model.SourceRange;
@@ -25,13 +29,17 @@ import static com.xray.model.Enums.*;
 public final class ParsePipeline {
 
     private final JavaParser javaParser;
+    private final ObjectMapper objectMapper;
+    private final OutputLayout outputLayout;
 
-    public ParsePipeline(JavaParser javaParser) {
+    public ParsePipeline(JavaParser javaParser, ObjectMapper objectMapper, OutputLayout outputLayout) {
         this.javaParser = javaParser;
+        this.objectMapper = objectMapper;
+        this.outputLayout = outputLayout;
     }
 
 
-    public ParsePipelineResult parseAll(Stream<Path> files) {
+    public ParsePipelineResult parseAll(Stream<Path> files) throws IOException {
         AstIndex astIndex = new AstIndex();
         List<ParseProblem> parseProblems = new ArrayList<>();
         ParseStats stats = new ParseStats();
@@ -42,13 +50,23 @@ public final class ParsePipeline {
             stats.add(parseStatus);
         });
 
+        writeProblems(parseProblems);
+
         return new ParsePipelineResult(
                 astIndex,
                 stats.total,
                 stats.ok,
-                stats.parseFailed,
-                parseProblems
+                stats.parseFailed
         );
+    }
+
+    private void writeProblems(List<ParseProblem> parseProblems) throws IOException {
+        if (parseProblems.isEmpty()) return;
+        try (JsonlWriter writer = new JsonlWriter(outputLayout.getParseProblems(), objectMapper)) {
+            for (ParseProblem parseProblem : parseProblems) {
+                writer.writeObject(parseProblem);
+            }
+        }
     }
 
     /**

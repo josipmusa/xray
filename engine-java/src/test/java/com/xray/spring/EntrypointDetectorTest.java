@@ -1,5 +1,7 @@
 package com.xray.spring;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.xray.io.OutputLayout;
 import com.xray.model.Enums;
 import com.xray.parse.AstIndex;
 import com.xray.parse.JavaParserFactory;
@@ -152,7 +154,7 @@ class EntrypointDetectorTest {
         Path sourceFile = tempDir.resolve(fileName);
         Files.writeString(sourceFile, source);
 
-        ParsePipeline parsePipeline = new ParsePipeline(JavaParserFactory.initialize());
+        ParsePipeline parsePipeline = new ParsePipeline(JavaParserFactory.initialize(), new ObjectMapper(), new OutputLayout(sourceFile));
         return parsePipeline.parseAll(Stream.of(sourceFile)).astIndex();
     }
 

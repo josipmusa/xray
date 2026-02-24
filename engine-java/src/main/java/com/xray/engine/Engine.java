@@ -2,95 +2,48 @@ package com.xray.engine;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xray.config.EngineConfig;
-import com.xray.io.IndexWriter;
-import com.xray.io.JsonlWriter;
 import com.xray.io.OutputLayout;
 import com.xray.model.*;
 import com.xray.parse.*;
-import com.xray.spring.BeanDetector;
-import com.xray.spring.EntrypointDetector;
-import lombok.RequiredArgsConstructor;
+import com.xray.phase.EdgePhase;
+import com.xray.phase.NodePhase;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.stream.Stream;
 
 @Slf4j
 public final class Engine {
 
     private final ParsePipeline parsePipeline;
+    private final NodePhase nodePhase;
+    private final EdgePhase edgePhase;
     private final ObjectMapper objectMapper;
-    private final IndexWriter indexWriter;
+    private final OutputLayout outputLayout;
 
-    public Engine(ParsePipeline parsePipeline, ObjectMapper objectMapper) {
+    public Engine(ParsePipeline parsePipeline, NodePhase nodePhase, EdgePhase edgePhase, ObjectMapper objectMapper, OutputLayout outputLayout) {
         this.parsePipeline = parsePipeline;
+        this.nodePhase = nodePhase;
+        this.edgePhase = edgePhase;
         this.objectMapper = objectMapper;
-        this.indexWriter = new IndexWriter(objectMapper);
+        this.outputLayout = outputLayout;
     }
 
     public void analyze(EngineConfig engineConfig) throws IOException {
-        OutputLayout outputLayout = new OutputLayout(engineConfig.outputDir());
-
         log.info("Scanning repo: {}", engineConfig.repoRoot().toAbsolutePath());
 
         try (Stream<Path> files = RepoScanner.findJavaFiles(engineConfig)) {
             ParsePipelineResult parsePipelineResult = parsePipeline.parseAll(files);
-            AstIndex astIndex = parsePipelineResult.astIndex();
-            EntrypointIndex entrypointIndex = EntrypointDetector.annotateEntrypoints(astIndex);
-            BeanDetector.annotateBeans(astIndex);
+            long nodesWritten = nodePhase.processNodes(parsePipelineResult.astIndex());
+            edgePhase.processEdges(parsePipelineResult.astIndex());
 
-            long nodesWritten = writeNodes(astIndex, outputLayout);
-            indexWriter.writeEntrypoints(outputLayout, entrypointIndex);
-
-            writeProblems(parsePipelineResult.parseProblems(), outputLayout);
-            writeMeta(parsePipelineResult, nodesWritten, engineConfig, outputLayout);
+            writeMeta(parsePipelineResult, nodesWritten, engineConfig);
         }
     }
 
-    private void writeProblems(List<ParseProblem> parseProblems, OutputLayout outputLayout) throws IOException {
-        if (parseProblems.isEmpty()) return;
-        try (JsonlWriter writer = new JsonlWriter(outputLayout.getParseProblems(), objectMapper)) {
-            for (ParseProblem parseProblem : parseProblems) {
-                writer.writeObject(parseProblem);
-            }
-        }
-    }
-
-    private long writeNodes(AstIndex astIndex, OutputLayout outputLayout) throws IOException {
-        Map<String, List<String>> nameToIds = new HashMap<>();
-        Map<String, List<String>> fileToIds = new HashMap<>();
-        try (JsonlWriter nodeWriter = new JsonlWriter(outputLayout.getNodes(), objectMapper)) {
-            long nodesWritten = NodeBuilder.buildNodes(astIndex)
-                    .map(node -> {
-                        try {
-                            nodeWriter.writeObject(node);
-                            nameToIds.computeIfAbsent(node.name(), k -> new ArrayList<>()).add(node.id());
-                            nameToIds.computeIfAbsent(node.name().toLowerCase(), k -> new ArrayList<>()).add(node.id());
-                            nameToIds.computeIfAbsent(node.fqcn(), k -> new ArrayList<>()).add(node.id());
-                            fileToIds.computeIfAbsent(node.source().file(), k -> new ArrayList<>()).add(node.id());
-                            return true;
-                        } catch (IOException e) {
-                            log.error("Error writing node, skipping", e);
-                            return false;
-                        }
-                    })
-                    .filter(Boolean::booleanValue)
-                    .count();
-
-            indexWriter.writeNameToIds(outputLayout, nameToIds);
-            indexWriter.writeFileToIds(outputLayout, fileToIds);
-
-            return nodesWritten;
-        }
-    }
-
-    private void writeMeta(ParsePipelineResult parsePipelineResult, long nodesWritten, EngineConfig engineConfig, OutputLayout outputLayout) throws IOException {
+    private void writeMeta(ParsePipelineResult parsePipelineResult, long nodesWritten, EngineConfig engineConfig) throws IOException {
         Meta.Stats stats = new Meta.Stats(
                 parsePipelineResult.javaFilesFound(),
                 parsePipelineResult.filesParsedOk(),

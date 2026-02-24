@@ -6,7 +6,7 @@ import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.xray.model.EntrypointIndex;
 import com.xray.parse.AstIndex;
-import com.xray.parse.NodeIdGenerator;
+import com.xray.engine.NodeIdGenerator;
 
 import java.nio.file.Path;
 import java.util.*;
