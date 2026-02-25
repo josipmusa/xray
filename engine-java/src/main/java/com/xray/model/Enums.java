@@ -18,7 +18,7 @@ public final class Enums {
 
     public enum EdgeType {
         CONTAINS,              // class -> method
-        DI,                    // bean -> bean dependency
+        DI,                    // dependency injection (constructor, autowired)
         CALL,                  // method -> method
         ENTRYPOINT_TO_METHOD,  // entrypoint -> method
         PERSISTENCE_HIT,       // method/bean -> persistence node
@@ -28,8 +28,6 @@ public final class Enums {
     }
 
     public enum Confidence { HIGH, MEDIUM, LOW }
-
-    public enum EntrypointKind { HTTP, KAFKA, RABBIT, SCHEDULED }
 
     public enum SegmentKind { SEGMENT, NOTE }
 }

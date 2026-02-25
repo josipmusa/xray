@@ -80,6 +80,95 @@ class EdgePhaseTest {
         assertTrue(edges.isEmpty());
     }
 
+    @Test
+    void writesDiConstructorEdgeForBeanConstructorDependency() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+
+        Path beanFile = tempDir.resolve("OrderService.java");
+        Files.writeString(beanFile,
+                """
+                        @Service
+                        class OrderService {
+                            private final OrderRepository orderRepository;
+
+                            OrderService(OrderRepository orderRepository) {
+                                this.orderRepository = orderRepository;
+                            }
+                        }
+                        """
+        );
+
+        Path dependencyFile = tempDir.resolve("OrderRepository.java");
+        Files.writeString(dependencyFile,
+                """
+                        class OrderRepository {}
+                        """
+        );
+
+        AstIndex astIndex = new ParsePipeline(JavaParserFactory.initialize(), objectMapper, outputLayout)
+                .parseAll(Stream.of(beanFile, dependencyFile))
+                .astIndex();
+
+        new EdgePhase(objectMapper, outputLayout).processEdges(astIndex);
+
+        List<Edge> diEdges = readEdges(outputLayout, objectMapper).stream()
+                .filter(edge -> edge.type() == Enums.EdgeType.DI)
+                .toList();
+
+        assertEquals(1, diEdges.size());
+
+        Map<String, String> classIdByFqcn = astIndex.nodeDrafts().values().stream()
+                .filter(draft -> draft.kind() == Enums.NodeKind.CLASS)
+                .collect(Collectors.toMap(AstIndex.NodeDraft::fqcn, AstIndex.NodeDraft::id));
+
+        assertEquals(classIdByFqcn.get("OrderService"), diEdges.getFirst().fromId());
+        assertEquals(classIdByFqcn.get("OrderRepository"), diEdges.getFirst().toId());
+    }
+
+    @Test
+    void writesDiConstructorEdgeForAutowiredFieldDependency() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+
+        Path beanFile = tempDir.resolve("PaymentService.java");
+        Files.writeString(beanFile,
+                """
+                        @Service
+                        class PaymentService {
+                            @Autowired
+                            private PaymentGateway paymentGateway;
+                        }
+                        """
+        );
+
+        Path dependencyFile = tempDir.resolve("PaymentGateway.java");
+        Files.writeString(dependencyFile,
+                """
+                        class PaymentGateway {}
+                        """
+        );
+
+        AstIndex astIndex = new ParsePipeline(JavaParserFactory.initialize(), objectMapper, outputLayout)
+                .parseAll(Stream.of(beanFile, dependencyFile))
+                .astIndex();
+
+        new EdgePhase(objectMapper, outputLayout).processEdges(astIndex);
+
+        List<Edge> diEdges = readEdges(outputLayout, objectMapper).stream()
+                .filter(edge -> edge.type() == Enums.EdgeType.DI)
+                .toList();
+
+        assertEquals(1, diEdges.size());
+
+        Map<String, String> classIdByFqcn = astIndex.nodeDrafts().values().stream()
+                .filter(draft -> draft.kind() == Enums.NodeKind.CLASS)
+                .collect(Collectors.toMap(AstIndex.NodeDraft::fqcn, AstIndex.NodeDraft::id));
+
+        assertEquals(classIdByFqcn.get("PaymentService"), diEdges.getFirst().fromId());
+        assertEquals(classIdByFqcn.get("PaymentGateway"), diEdges.getFirst().toId());
+    }
+
     private OutputLayout createOutputLayout() throws IOException {
         Path outputRoot = tempDir.resolve(".xray");
         Files.createDirectories(outputRoot);

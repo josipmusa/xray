@@ -13,7 +13,7 @@ import com.xray.parse.ParsePipeline;
 import com.xray.phase.EdgePhase;
 import com.xray.phase.NodePhase;
 
-public class Main {
+public final class Main {
 
     public static void main(String[] args) throws Exception {
         EngineConfig engineConfig = ArgsParser.parse(args);
