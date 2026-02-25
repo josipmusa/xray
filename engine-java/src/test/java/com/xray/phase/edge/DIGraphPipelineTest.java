@@ -1,6 +1,8 @@
-package com.xray.phase;
+package com.xray.phase.edge;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.xray.io.OutputLayout;
 import com.xray.model.Edge;
 import com.xray.model.Enums;
@@ -13,15 +15,18 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class EdgePhaseTest {
+class DIGraphPipelineTest {
 
     @TempDir
     Path tempDir;
@@ -30,19 +35,18 @@ class EdgePhaseTest {
     void writesContainsEdgeForEachMethodNode() throws IOException {
         ObjectMapper objectMapper = new ObjectMapper();
         OutputLayout outputLayout = createOutputLayout();
-        AstIndex astIndex = parse(
-                """
+        AstIndex astIndex = parseAll(
+                objectMapper,
+                outputLayout,
+                file("OrderService.java", """
                         class OrderService {
                             void process() {}
-                            String status(int code) { return "ok"; }
+                            String status(int code) { return \"ok\"; }
                         }
-                        """,
-                "OrderService.java",
-                objectMapper,
-                outputLayout
+                        """)
         );
 
-        new EdgePhase(objectMapper, outputLayout).processEdges(astIndex);
+        new DIGraphPipeline(objectMapper, outputLayout).emitGraphEdges(astIndex, buildFqcnToClassDecl(astIndex));
 
         List<Edge> edges = readEdges(outputLayout, objectMapper);
         assertEquals(2, edges.size());
@@ -62,32 +66,13 @@ class EdgePhaseTest {
     }
 
     @Test
-    void writesNoEdgesWhenNoMethodNodesExist() throws IOException {
+    void writesDiEdgeForBeanConstructorDependency() throws IOException {
         ObjectMapper objectMapper = new ObjectMapper();
         OutputLayout outputLayout = createOutputLayout();
-        AstIndex astIndex = parse(
-                """
-                        class EmptyType {}
-                        """,
-                "EmptyType.java",
+        AstIndex astIndex = parseAll(
                 objectMapper,
-                outputLayout
-        );
-
-        new EdgePhase(objectMapper, outputLayout).processEdges(astIndex);
-
-        List<Edge> edges = readEdges(outputLayout, objectMapper);
-        assertTrue(edges.isEmpty());
-    }
-
-    @Test
-    void writesDiConstructorEdgeForBeanConstructorDependency() throws IOException {
-        ObjectMapper objectMapper = new ObjectMapper();
-        OutputLayout outputLayout = createOutputLayout();
-
-        Path beanFile = tempDir.resolve("OrderService.java");
-        Files.writeString(beanFile,
-                """
+                outputLayout,
+                file("OrderService.java", """
                         @Service
                         class OrderService {
                             private final OrderRepository orderRepository;
@@ -96,21 +81,13 @@ class EdgePhaseTest {
                                 this.orderRepository = orderRepository;
                             }
                         }
-                        """
-        );
-
-        Path dependencyFile = tempDir.resolve("OrderRepository.java");
-        Files.writeString(dependencyFile,
-                """
+                        """),
+                file("OrderRepository.java", """
                         class OrderRepository {}
-                        """
+                        """)
         );
 
-        AstIndex astIndex = new ParsePipeline(JavaParserFactory.initialize(), objectMapper, outputLayout)
-                .parseAll(Stream.of(beanFile, dependencyFile))
-                .astIndex();
-
-        new EdgePhase(objectMapper, outputLayout).processEdges(astIndex);
+        new DIGraphPipeline(objectMapper, outputLayout).emitGraphEdges(astIndex, buildFqcnToClassDecl(astIndex));
 
         List<Edge> diEdges = readEdges(outputLayout, objectMapper).stream()
                 .filter(edge -> edge.type() == Enums.EdgeType.DI)
@@ -127,33 +104,25 @@ class EdgePhaseTest {
     }
 
     @Test
-    void writesDiConstructorEdgeForAutowiredFieldDependency() throws IOException {
+    void writesDiEdgeForAutowiredFieldDependency() throws IOException {
         ObjectMapper objectMapper = new ObjectMapper();
         OutputLayout outputLayout = createOutputLayout();
-
-        Path beanFile = tempDir.resolve("PaymentService.java");
-        Files.writeString(beanFile,
-                """
+        AstIndex astIndex = parseAll(
+                objectMapper,
+                outputLayout,
+                file("PaymentService.java", """
                         @Service
                         class PaymentService {
                             @Autowired
                             private PaymentGateway paymentGateway;
                         }
-                        """
-        );
-
-        Path dependencyFile = tempDir.resolve("PaymentGateway.java");
-        Files.writeString(dependencyFile,
-                """
+                        """),
+                file("PaymentGateway.java", """
                         class PaymentGateway {}
-                        """
+                        """)
         );
 
-        AstIndex astIndex = new ParsePipeline(JavaParserFactory.initialize(), objectMapper, outputLayout)
-                .parseAll(Stream.of(beanFile, dependencyFile))
-                .astIndex();
-
-        new EdgePhase(objectMapper, outputLayout).processEdges(astIndex);
+        new DIGraphPipeline(objectMapper, outputLayout).emitGraphEdges(astIndex, buildFqcnToClassDecl(astIndex));
 
         List<Edge> diEdges = readEdges(outputLayout, objectMapper).stream()
                 .filter(edge -> edge.type() == Enums.EdgeType.DI)
@@ -169,18 +138,50 @@ class EdgePhaseTest {
         assertEquals(classIdByFqcn.get("PaymentGateway"), diEdges.getFirst().toId());
     }
 
+    @Test
+    void writesNoEdgesWhenNoMethodNodesExist() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+        AstIndex astIndex = parseAll(
+                objectMapper,
+                outputLayout,
+                file("EmptyType.java", """
+                        class EmptyType {}
+                        """)
+        );
+
+        new DIGraphPipeline(objectMapper, outputLayout).emitGraphEdges(astIndex, buildFqcnToClassDecl(astIndex));
+
+        List<Edge> edges = readEdges(outputLayout, objectMapper);
+        assertTrue(edges.isEmpty());
+    }
+
     private OutputLayout createOutputLayout() throws IOException {
         Path outputRoot = tempDir.resolve(".xray");
         Files.createDirectories(outputRoot);
         return new OutputLayout(outputRoot);
     }
 
-    private AstIndex parse(String source, String fileName, ObjectMapper objectMapper, OutputLayout outputLayout) throws IOException {
-        Path sourceFile = tempDir.resolve(fileName);
-        Files.writeString(sourceFile, source);
+    private AstIndex parseAll(ObjectMapper objectMapper, OutputLayout outputLayout, SourceFile... sourceFiles) throws IOException {
+        List<Path> files = new java.util.ArrayList<>();
+        for (SourceFile sourceFile : sourceFiles) {
+            Path path = tempDir.resolve(sourceFile.fileName());
+            Files.writeString(path, sourceFile.source());
+            files.add(path);
+        }
 
-        ParsePipeline parsePipeline = new ParsePipeline(JavaParserFactory.initialize(), objectMapper, outputLayout);
-        return parsePipeline.parseAll(Stream.of(sourceFile)).astIndex();
+        ParsePipeline parsePipeline = new ParsePipeline(JavaParserFactory.initialize(tempDir), objectMapper, outputLayout);
+        return parsePipeline.parseAll(files.stream()).astIndex();
+    }
+
+    private Map<String, ClassOrInterfaceDeclaration> buildFqcnToClassDecl(AstIndex astIndex) {
+        Map<String, ClassOrInterfaceDeclaration> map = new HashMap<>();
+        for (CompilationUnit cu : astIndex.fileToCu().values()) {
+            for (ClassOrInterfaceDeclaration c : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+                c.getFullyQualifiedName().ifPresent(fqcn -> map.putIfAbsent(fqcn, c));
+            }
+        }
+        return map;
     }
 
     private List<Edge> readEdges(OutputLayout outputLayout, ObjectMapper objectMapper) throws IOException {
@@ -201,4 +202,10 @@ class EdgePhaseTest {
                     .toList();
         }
     }
+
+    private SourceFile file(String fileName, String source) {
+        return new SourceFile(fileName, source);
+    }
+
+    private record SourceFile(String fileName, String source) {}
 }

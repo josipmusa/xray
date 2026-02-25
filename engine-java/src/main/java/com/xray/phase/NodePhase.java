@@ -31,14 +31,14 @@ public final class NodePhase {
         this.outputLayout = outputLayout;
     }
 
-    public long processNodes(AstIndex astIndex) throws IOException {
+    public Result executePhase(AstIndex astIndex) throws IOException {
         EntrypointIndex entrypointIndex = EntrypointDetector.annotateEntrypoints(astIndex);
         BeanDetector.annotateBeans(astIndex);
 
         long nodesWritten = writeNodes(astIndex);
         indexWriter.writeEntrypoints(outputLayout, entrypointIndex);
 
-        return nodesWritten;
+        return new Result(nodesWritten);
     }
 
     private long writeNodes(AstIndex astIndex) throws IOException {
@@ -85,4 +85,6 @@ public final class NodePhase {
                         nodeDraft.attributes()
                 ));
     }
+
+    public record Result(long nodesWritten) {}
 }

@@ -116,7 +116,7 @@ class BeanDetectorTest {
         Path sourceFile = tempDir.resolve(fileName);
         Files.writeString(sourceFile, source);
 
-        ParsePipeline parsePipeline = new ParsePipeline(JavaParserFactory.initialize(), new ObjectMapper(), new OutputLayout(sourceFile));
+        ParsePipeline parsePipeline = new ParsePipeline(JavaParserFactory.initialize(tempDir), new ObjectMapper(), new OutputLayout(sourceFile));
         return parsePipeline.parseAll(Stream.of(sourceFile)).astIndex();
     }
 

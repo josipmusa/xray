@@ -10,7 +10,7 @@ import com.xray.engine.Engine;
 import com.xray.io.OutputLayout;
 import com.xray.parse.JavaParserFactory;
 import com.xray.parse.ParsePipeline;
-import com.xray.phase.EdgePhase;
+import com.xray.phase.edge.EdgePhase;
 import com.xray.phase.NodePhase;
 
 public final class Main {
@@ -22,7 +22,7 @@ public final class Main {
                 .registerModule(new JavaTimeModule())
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
-        JavaParser javaParser = JavaParserFactory.initialize();
+        JavaParser javaParser = JavaParserFactory.initialize(engineConfig.repoRoot());
         ParsePipeline parsePipeline = new ParsePipeline(javaParser, objectMapper, outputLayout);
         NodePhase nodePhase = new NodePhase(objectMapper, outputLayout);
         EdgePhase edgePhase = new EdgePhase(objectMapper, outputLayout);

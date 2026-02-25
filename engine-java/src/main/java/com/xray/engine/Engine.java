@@ -5,7 +5,7 @@ import com.xray.config.EngineConfig;
 import com.xray.io.OutputLayout;
 import com.xray.model.*;
 import com.xray.parse.*;
-import com.xray.phase.EdgePhase;
+import com.xray.phase.edge.EdgePhase;
 import com.xray.phase.NodePhase;
 import lombok.extern.slf4j.Slf4j;
 
@@ -36,10 +36,10 @@ public final class Engine {
 
         try (Stream<Path> files = RepoScanner.findJavaFiles(engineConfig)) {
             ParsePipelineResult parsePipelineResult = parsePipeline.parseAll(files);
-            long nodesWritten = nodePhase.processNodes(parsePipelineResult.astIndex());
-            edgePhase.processEdges(parsePipelineResult.astIndex());
+            NodePhase.Result nodePhaseResult = nodePhase.executePhase(parsePipelineResult.astIndex());
+            edgePhase.executePhase(parsePipelineResult.astIndex());
 
-            writeMeta(parsePipelineResult, nodesWritten, engineConfig);
+            writeMeta(parsePipelineResult, nodePhaseResult.nodesWritten(), engineConfig);
         }
     }
 

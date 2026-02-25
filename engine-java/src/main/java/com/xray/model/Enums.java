@@ -19,7 +19,7 @@ public final class Enums {
     public enum EdgeType {
         CONTAINS,              // class -> method
         DI,                    // dependency injection (constructor, autowired)
-        CALL,                  // method -> method
+        CALLS,                  // method -> method
         ENTRYPOINT_TO_METHOD,  // entrypoint -> method
         PERSISTENCE_HIT,       // method/bean -> persistence node
         OUTBOUND_CALL,         // method/bean -> outbound node
