@@ -24,7 +24,7 @@ public final class CallGraphPipeline {
         this.outputLayout = outputLayout;
     }
 
-    public void emitCallGraphs(Input input) throws IOException {
+    public void emitEdges(Input input) throws IOException {
         try (JsonlWriter writer = new JsonlWriter(outputLayout.getEdges(), objectMapper)) {
             for (Input.ClassData classData : input.classData()) {
 
@@ -77,10 +77,10 @@ public final class CallGraphPipeline {
 
     public record Input(List<ClassData> classData) {
 
-        public record ClassData(String fqcn, ClassOrInterfaceDeclaration clazz, List<InjectedFields> injectedFields) {
+        public record ClassData(String fqcn, ClassOrInterfaceDeclaration clazz, List<InjectedField> injectedFields) {
         }
 
-        public record InjectedFields(String fieldName, String declaredTypeFqcn) {
+        public record InjectedField(String fieldName, String declaredTypeFqcn) {
         }
     }
 

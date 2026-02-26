@@ -25,10 +25,10 @@ public final class EdgePhase {
 
     public void executePhase(AstIndex astIndex) throws IOException {
         Map<String, ClassOrInterfaceDeclaration> fqcnToDecl = buildFqcnToClassDecl(astIndex);
-        CallGraphPipeline.Input callGraphPipelineInput = buildCallGraphPipelineInput(fqcnToDecl);
+        DIGraphPipeline.Result diResult = this.diGraphPipeline.emitEdges(astIndex, fqcnToDecl);
 
-        this.diGraphPipeline.emitGraphEdges(astIndex, fqcnToDecl);
-        this.callGraphPipeline.emitCallGraphs(callGraphPipelineInput);
+        CallGraphPipeline.Input callGraphPipelineInput = buildCallGraphPipelineInput(fqcnToDecl, diResult);
+        this.callGraphPipeline.emitEdges(callGraphPipelineInput);
     }
 
     private static Map<String, ClassOrInterfaceDeclaration> buildFqcnToClassDecl(AstIndex astIndex) {
@@ -41,10 +41,16 @@ public final class EdgePhase {
         return map;
     }
 
-    private static CallGraphPipeline.Input buildCallGraphPipelineInput(Map<String, ClassOrInterfaceDeclaration> fqcnToDecl) {
+    private static CallGraphPipeline.Input buildCallGraphPipelineInput(
+            Map<String, ClassOrInterfaceDeclaration> fqcnToDecl,
+            DIGraphPipeline.Result diResult) {
         List<CallGraphPipeline.Input.ClassData> classDataList = new ArrayList<>();
         for (Map.Entry<String, ClassOrInterfaceDeclaration> entry : fqcnToDecl.entrySet()) {
-            classDataList.add(new CallGraphPipeline.Input.ClassData(entry.getKey(), entry.getValue(), null));
+            classDataList.add(new CallGraphPipeline.Input.ClassData(
+                    entry.getKey(),
+                    entry.getValue(),
+                    diResult.injectedFieldsByClassFqcn().getOrDefault(entry.getKey(), List.of())
+            ));
         }
         return new CallGraphPipeline.Input(classDataList);
     }

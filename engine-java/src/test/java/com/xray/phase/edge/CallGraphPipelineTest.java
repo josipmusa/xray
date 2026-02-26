@@ -52,7 +52,7 @@ class CallGraphPipelineTest {
                 List.of(new CallGraphPipeline.Input.ClassData("OrderService", clazz, null))
         );
 
-        new CallGraphPipeline(objectMapper, outputLayout).emitCallGraphs(input);
+        new CallGraphPipeline(objectMapper, outputLayout).emitEdges(input);
 
         List<Edge> callEdges = readEdges(outputLayout, objectMapper);
         assertEquals(1, callEdges.size());
@@ -86,7 +86,7 @@ class CallGraphPipelineTest {
                 List.of(new CallGraphPipeline.Input.ClassData("OrderService", clazz, null))
         );
 
-        new CallGraphPipeline(objectMapper, outputLayout).emitCallGraphs(input);
+        new CallGraphPipeline(objectMapper, outputLayout).emitEdges(input);
 
         List<Edge> callEdges = readEdges(outputLayout, objectMapper);
         assertEquals(1, callEdges.size());

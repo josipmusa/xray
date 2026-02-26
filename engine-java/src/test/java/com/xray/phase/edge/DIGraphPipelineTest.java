@@ -9,6 +9,7 @@ import com.xray.model.Enums;
 import com.xray.parse.AstIndex;
 import com.xray.parse.JavaParserFactory;
 import com.xray.parse.ParsePipeline;
+import com.xray.phase.edge.callgraph.CallGraphPipeline;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -46,7 +47,7 @@ class DIGraphPipelineTest {
                         """)
         );
 
-        new DIGraphPipeline(objectMapper, outputLayout).emitGraphEdges(astIndex, buildFqcnToClassDecl(astIndex));
+        new DIGraphPipeline(objectMapper, outputLayout).emitEdges(astIndex, buildFqcnToClassDecl(astIndex));
 
         List<Edge> edges = readEdges(outputLayout, objectMapper);
         assertEquals(2, edges.size());
@@ -87,7 +88,7 @@ class DIGraphPipelineTest {
                         """)
         );
 
-        new DIGraphPipeline(objectMapper, outputLayout).emitGraphEdges(astIndex, buildFqcnToClassDecl(astIndex));
+        DIGraphPipeline.Result result = new DIGraphPipeline(objectMapper, outputLayout).emitEdges(astIndex, buildFqcnToClassDecl(astIndex));
 
         List<Edge> diEdges = readEdges(outputLayout, objectMapper).stream()
                 .filter(edge -> edge.type() == Enums.EdgeType.DI)
@@ -101,6 +102,10 @@ class DIGraphPipelineTest {
 
         assertEquals(classIdByFqcn.get("OrderService"), diEdges.getFirst().fromId());
         assertEquals(classIdByFqcn.get("OrderRepository"), diEdges.getFirst().toId());
+        assertEquals(
+                List.of(new CallGraphPipeline.Input.InjectedField("orderRepository", "OrderRepository")),
+                result.injectedFieldsByClassFqcn().get("OrderService")
+        );
     }
 
     @Test
@@ -122,7 +127,7 @@ class DIGraphPipelineTest {
                         """)
         );
 
-        new DIGraphPipeline(objectMapper, outputLayout).emitGraphEdges(astIndex, buildFqcnToClassDecl(astIndex));
+        DIGraphPipeline.Result result = new DIGraphPipeline(objectMapper, outputLayout).emitEdges(astIndex, buildFqcnToClassDecl(astIndex));
 
         List<Edge> diEdges = readEdges(outputLayout, objectMapper).stream()
                 .filter(edge -> edge.type() == Enums.EdgeType.DI)
@@ -136,6 +141,10 @@ class DIGraphPipelineTest {
 
         assertEquals(classIdByFqcn.get("PaymentService"), diEdges.getFirst().fromId());
         assertEquals(classIdByFqcn.get("PaymentGateway"), diEdges.getFirst().toId());
+        assertEquals(
+                List.of(new CallGraphPipeline.Input.InjectedField("paymentGateway", "PaymentGateway")),
+                result.injectedFieldsByClassFqcn().get("PaymentService")
+        );
     }
 
     @Test
@@ -150,7 +159,7 @@ class DIGraphPipelineTest {
                         """)
         );
 
-        new DIGraphPipeline(objectMapper, outputLayout).emitGraphEdges(astIndex, buildFqcnToClassDecl(astIndex));
+        new DIGraphPipeline(objectMapper, outputLayout).emitEdges(astIndex, buildFqcnToClassDecl(astIndex));
 
         List<Edge> edges = readEdges(outputLayout, objectMapper);
         assertTrue(edges.isEmpty());
