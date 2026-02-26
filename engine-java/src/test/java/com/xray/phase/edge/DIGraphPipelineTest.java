@@ -23,9 +23,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 class DIGraphPipelineTest {
 
@@ -42,7 +40,7 @@ class DIGraphPipelineTest {
                 file("OrderService.java", """
                         class OrderService {
                             void process() {}
-                            String status(int code) { return \"ok\"; }
+                            String status(int code) { return "ok"; }
                         }
                         """)
         );
@@ -322,6 +320,33 @@ class DIGraphPipelineTest {
         assertEquals(3, diEdges.size());
     }
 
+    @Test
+    void indexesInjectedFieldWhenDependencyTargetClassCannotBeResolved() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+        AstIndex astIndex = parseAll(
+                objectMapper,
+                outputLayout,
+                file("OrderService.java", """
+                        @Service
+                        class OrderService {
+                            private final JdbcTemplate jdbcTemplate;
+
+                            OrderService(JdbcTemplate jdbcTemplate) {
+                                this.jdbcTemplate = jdbcTemplate;
+                            }
+                        }
+                        """)
+        );
+
+        DIGraphPipeline.Result result = new DIGraphPipeline(objectMapper, outputLayout).emitEdges(astIndex, buildFqcnToClassDecl(astIndex));
+
+        assertEquals(
+                List.of(new CallGraphPipeline.Input.InjectedField("jdbcTemplate", "JdbcTemplate")),
+                result.injectedFieldsByClassFqcn().get("OrderService")
+        );
+    }
+
     private OutputLayout createOutputLayout() throws IOException {
         Path outputRoot = tempDir.resolve(".xray");
         Files.createDirectories(outputRoot);
@@ -382,8 +407,8 @@ class DIGraphPipelineTest {
 
     private static void assertHasEvidenceFile(Edge edge) {
         assertNotNull(edge.evidence());
-        assertTrue(!edge.evidence().isEmpty());
+        assertFalse(edge.evidence().isEmpty());
         assertNotNull(edge.evidence().getFirst().file());
-        assertTrue(!edge.evidence().getFirst().file().isBlank());
+        assertFalse(edge.evidence().getFirst().file().isBlank());
     }
 }

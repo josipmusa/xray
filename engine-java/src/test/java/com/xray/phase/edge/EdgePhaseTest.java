@@ -50,6 +50,41 @@ class EdgePhaseTest {
         assertTrue(edges.stream().anyMatch(edge -> edge.type() == Enums.EdgeType.CALLS));
     }
 
+    @Test
+    void executePhaseProducesPersistenceHitEdgeForRepositoryCall() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+
+        Path serviceFile = tempDir.resolve("OrderService.java");
+        Files.writeString(serviceFile, """
+                @Service
+                class OrderService {
+                    private final OrderRepository orderRepository;
+
+                    OrderService(OrderRepository orderRepository) {
+                        this.orderRepository = orderRepository;
+                    }
+
+                    void process() {
+                        orderRepository.findAll();
+                    }
+                }
+                """);
+        Path repositoryFile = tempDir.resolve("OrderRepository.java");
+        Files.writeString(repositoryFile, """
+                interface OrderRepository extends JpaRepository<Order, Long> {}
+                class Order {}
+                """);
+
+        ParsePipeline parsePipeline = new ParsePipeline(JavaParserFactory.initialize(tempDir), objectMapper, outputLayout);
+        AstIndex astIndex = parsePipeline.parseAll(Stream.of(serviceFile, repositoryFile)).astIndex();
+
+        new EdgePhase(objectMapper, outputLayout).executePhase(astIndex);
+
+        List<Edge> edges = readEdges(outputLayout, objectMapper);
+        assertTrue(edges.stream().anyMatch(edge -> edge.type() == Enums.EdgeType.PERSISTENCE_HIT && edge.toId().equals("OrderRepository")));
+    }
+
     private OutputLayout createOutputLayout() throws IOException {
         Path outputRoot = tempDir.resolve(".xray");
         Files.createDirectories(outputRoot);

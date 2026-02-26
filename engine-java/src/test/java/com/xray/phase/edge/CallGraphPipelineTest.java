@@ -220,6 +220,131 @@ class CallGraphPipelineTest {
         assertEvidenceFileEndsWith(edge, "OrderService.java");
     }
 
+    @Test
+    void emitsPersistenceHitForSpringDataRepositoryCall() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+
+        Path serviceFile = tempDir.resolve("OrderService.java");
+        Files.writeString(serviceFile, """
+                class OrderService {
+                    private final OrderRepository orderRepository;
+
+                    OrderService(OrderRepository orderRepository) {
+                        this.orderRepository = orderRepository;
+                    }
+
+                    void process() {
+                        orderRepository.findAll();
+                    }
+                }
+                """);
+
+        Path repositoryFile = tempDir.resolve("OrderRepository.java");
+        Files.writeString(repositoryFile, """
+                interface OrderRepository extends JpaRepository<Order, Long> {}
+                class Order {}
+                """);
+
+        ParsePipeline parsePipeline = new ParsePipeline(JavaParserFactory.initialize(tempDir), objectMapper, outputLayout);
+        AstIndex astIndex = parsePipeline.parseAll(Stream.of(serviceFile, repositoryFile)).astIndex();
+
+        ClassOrInterfaceDeclaration serviceClass = findClass(astIndex, "OrderService").orElseThrow();
+        ClassOrInterfaceDeclaration repositoryClass = findClass(astIndex, "OrderRepository").orElseThrow();
+        CallGraphPipeline.Input input = new CallGraphPipeline.Input(
+                List.of(
+                        new CallGraphPipeline.Input.ClassData(
+                                "OrderService",
+                                serviceClass,
+                                List.of(new CallGraphPipeline.Input.InjectedField("orderRepository", "OrderRepository"))
+                        ),
+                        new CallGraphPipeline.Input.ClassData("OrderRepository", repositoryClass, List.of())
+                )
+        );
+
+        new CallGraphPipeline(objectMapper, outputLayout).emitEdges(input);
+
+        List<Edge> edges = readEdges(outputLayout, objectMapper);
+        assertTrue(edges.stream().anyMatch(edge -> edge.type() == Enums.EdgeType.PERSISTENCE_HIT && edge.toId().equals("OrderRepository")));
+    }
+
+    @Test
+    void emitsPersistenceHitForJdbcTemplateCall() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+
+        Path serviceFile = tempDir.resolve("OrderService.java");
+        Files.writeString(serviceFile, """
+                class OrderService {
+                    private final JdbcTemplate jdbcTemplate;
+
+                    OrderService(JdbcTemplate jdbcTemplate) {
+                        this.jdbcTemplate = jdbcTemplate;
+                    }
+
+                    void process() {
+                        jdbcTemplate.queryForList("select 1");
+                    }
+                }
+                """);
+
+        ParsePipeline parsePipeline = new ParsePipeline(JavaParserFactory.initialize(tempDir), objectMapper, outputLayout);
+        AstIndex astIndex = parsePipeline.parseAll(Stream.of(serviceFile)).astIndex();
+
+        ClassOrInterfaceDeclaration serviceClass = findClass(astIndex, "OrderService").orElseThrow();
+        CallGraphPipeline.Input input = new CallGraphPipeline.Input(
+                List.of(new CallGraphPipeline.Input.ClassData(
+                        "OrderService",
+                        serviceClass,
+                        List.of(new CallGraphPipeline.Input.InjectedField("jdbcTemplate", "JdbcTemplate"))
+                ))
+        );
+
+        new CallGraphPipeline(objectMapper, outputLayout).emitEdges(input);
+
+        List<Edge> edges = readEdges(outputLayout, objectMapper);
+        assertTrue(edges.stream().anyMatch(edge -> edge.type() == Enums.EdgeType.PERSISTENCE_HIT && edge.toId().equals("persistence:db")));
+    }
+
+    @Test
+    void emitsPersistenceHitForEntityManagerCall() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+
+        Path serviceFile = tempDir.resolve("OrderService.java");
+        Files.writeString(serviceFile, """
+                class OrderService {
+                    private final EntityManager entityManager;
+
+                    OrderService(EntityManager entityManager) {
+                        this.entityManager = entityManager;
+                    }
+
+                    void process() {
+                        entityManager.persist(new Order());
+                    }
+                }
+                class Order {}
+                """);
+
+        ParsePipeline parsePipeline = new ParsePipeline(JavaParserFactory.initialize(tempDir), objectMapper, outputLayout);
+        AstIndex astIndex = parsePipeline.parseAll(Stream.of(serviceFile)).astIndex();
+
+        ClassOrInterfaceDeclaration serviceClass = findClass(astIndex, "OrderService").orElseThrow();
+        CallGraphPipeline.Input input = new CallGraphPipeline.Input(
+                List.of(new CallGraphPipeline.Input.ClassData(
+                        "OrderService",
+                        serviceClass,
+                        List.of(new CallGraphPipeline.Input.InjectedField("entityManager", "EntityManager"))
+                ))
+        );
+
+        new CallGraphPipeline(objectMapper, outputLayout).emitEdges(input);
+
+        List<Edge> edges = readEdges(outputLayout, objectMapper);
+        assertTrue(edges.stream().anyMatch(edge -> edge.type() == Enums.EdgeType.PERSISTENCE_HIT && edge.toId().equals("persistence:db")));
+    }
+
     private Optional<ClassOrInterfaceDeclaration> firstClass(AstIndex astIndex) {
         return astIndex.fileToCu().values().stream()
                 .map(cu -> cu.findFirst(ClassOrInterfaceDeclaration.class))

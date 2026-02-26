@@ -35,21 +35,20 @@ public final class CallGraphPipeline {
                     Optional<BlockStmt> body = method.getBody();
                     if (body.isEmpty()) continue;
                     for (MethodCallExpr call : body.get().findAll(MethodCallExpr.class)) {
-                        Optional<Edge> sameClassCallEdge = SameClassCallHandler.tryGenerateEdge(classData, call, fromNodeId, declaredIndex);
-                        if (sameClassCallEdge.isPresent()) {
-                            writer.writeObject(sameClassCallEdge.get());
-                            continue;
+                        Optional<Edge> primaryCallEdge = SameClassCallHandler.tryGenerateEdge(classData, call, fromNodeId, declaredIndex);
+                        if (primaryCallEdge.isEmpty()) {
+                            primaryCallEdge = InjectedFieldCallHandler.tryGenerateEdge(classData, call, fromNodeId, input);
+                        }
+                        if (primaryCallEdge.isEmpty()) {
+                            primaryCallEdge = StaticCallHandler.tryGenerateEdge(call, fromNodeId, input);
+                        }
+                        if (primaryCallEdge.isPresent()) {
+                            writer.writeObject(primaryCallEdge.get());
                         }
 
-                        Optional<Edge> injectedFieldCallEdge = InjectedFieldCallHandler.tryGenerateEdge(classData, call, fromNodeId, input);
-                        if (injectedFieldCallEdge.isPresent()) {
-                            writer.writeObject(injectedFieldCallEdge.get());
-                            continue;
-                        }
-
-                        Optional<Edge> staticCallEdge = StaticCallHandler.tryGenerateEdge(call, fromNodeId, input);
-                        if (staticCallEdge.isPresent()) {
-                            writer.writeObject(staticCallEdge.get());
+                        Optional<Edge> persistenceHitEdge = PersistenceHitCallHandler.tryGenerateEdge(classData, call, fromNodeId, input);
+                        if (persistenceHitEdge.isPresent()) {
+                            writer.writeObject(persistenceHitEdge.get());
                         }
                     }
                 }

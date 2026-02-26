@@ -9,6 +9,7 @@ import com.xray.model.Node;
 import com.xray.parse.AstIndex;
 import com.xray.spring.BeanDetector;
 import com.xray.spring.EntrypointDetector;
+import com.xray.spring.PersistenceDetector;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
@@ -34,6 +35,7 @@ public final class NodePhase {
     public Result executePhase(AstIndex astIndex) throws IOException {
         EntrypointIndex entrypointIndex = EntrypointDetector.annotateEntrypoints(astIndex);
         BeanDetector.annotateBeans(astIndex);
+        PersistenceDetector.annotatePersistence(astIndex);
 
         long nodesWritten = writeNodes(astIndex);
         indexWriter.writeEntrypoints(outputLayout, entrypointIndex);

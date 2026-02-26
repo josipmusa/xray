@@ -9,6 +9,7 @@ import com.github.javaparser.ast.expr.AssignExpr;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.FieldAccessExpr;
 import com.github.javaparser.ast.nodeTypes.NodeWithAnnotations;
+import com.github.javaparser.ast.nodeTypes.NodeWithName;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import com.github.javaparser.ast.type.PrimitiveType;
 import com.github.javaparser.ast.type.Type;
@@ -90,6 +91,14 @@ final class DIGraphPipeline {
         for (Parameter parameter : constructor.getParameters()) {
             Optional<Type> injectableType = extractInjectableDependencyType(parameter.getType());
             if (injectableType.isEmpty()) continue;
+            Optional<String> assignedFieldName = findAssignedFieldName(constructor, parameter.getNameAsString());
+            assignedFieldName.ifPresent(s -> addInjectedField(
+                    classDraft.fqcn(),
+                    s,
+                    resolveDeclaredTypeFqcn(astIndex, clazz, injectableType.get()),
+                    injectedFieldIndex
+            ));
+
             Optional<DependencyTargetClassId> dependencyTargetClassId = resolveDependencyTargetClassId(astIndex, clazz, injectableType.get());
             if (dependencyTargetClassId.isEmpty()) {
                 continue;
@@ -105,14 +114,6 @@ final class DIGraphPipeline {
             );
 
             edgeWriter.writeObject(edge);
-
-            Optional<String> assignedFieldName = findAssignedFieldName(constructor, parameter.getNameAsString());
-            assignedFieldName.ifPresent(s -> addInjectedField(
-                    classDraft.fqcn(),
-                    s,
-                    resolveDeclaredTypeFqcn(astIndex, clazz, injectableType.get()),
-                    injectedFieldIndex
-            ));
         }
     }
 
@@ -126,6 +127,14 @@ final class DIGraphPipeline {
             if (!hasInjectionAnnotation(fieldDeclaration)) continue;
             Optional<Type> injectableType = extractInjectableDependencyType(fieldDeclaration.getElementType());
             if (injectableType.isEmpty()) continue;
+            for (VariableDeclarator variable : fieldDeclaration.getVariables()) {
+                addInjectedField(
+                        classDraft.fqcn(),
+                        variable.getNameAsString(),
+                        resolveDeclaredTypeFqcn(astIndex, clazz, injectableType.get()),
+                        injectedFieldIndex
+                );
+            }
             Optional<DependencyTargetClassId> dependencyTargetClassId = resolveDependencyTargetClassId(astIndex, clazz, injectableType.get());
             if (dependencyTargetClassId.isEmpty()) continue;
 
@@ -138,15 +147,6 @@ final class DIGraphPipeline {
             );
 
             edgeWriter.writeObject(edge);
-
-            for (VariableDeclarator variable : fieldDeclaration.getVariables()) {
-                addInjectedField(
-                        classDraft.fqcn(),
-                        variable.getNameAsString(),
-                        resolveDeclaredTypeFqcn(astIndex, clazz, injectableType.get()),
-                        injectedFieldIndex
-                );
-            }
         }
     }
 
@@ -167,6 +167,12 @@ final class DIGraphPipeline {
             for (VariableDeclarator variable : fieldDeclaration.getVariables()) {
                 Optional<Type> injectableType = extractInjectableDependencyType(variable.getType());
                 if (injectableType.isEmpty()) continue;
+                addInjectedField(
+                        classDraft.fqcn(),
+                        variable.getNameAsString(),
+                        resolveDeclaredTypeFqcn(astIndex, clazz, injectableType.get()),
+                        injectedFieldIndex
+                );
 
                 Optional<DependencyTargetClassId> dependencyTargetClassId = resolveDependencyTargetClassId(astIndex, clazz, injectableType.get());
                 if (dependencyTargetClassId.isEmpty()) continue;
@@ -180,13 +186,6 @@ final class DIGraphPipeline {
                         List.of(diLombokFieldEvidence(fieldDeclaration, variable))
                 );
                 edgeWriter.writeObject(edge);
-
-                addInjectedField(
-                        classDraft.fqcn(),
-                        variable.getNameAsString(),
-                        resolveDeclaredTypeFqcn(astIndex, clazz, injectableType.get()),
-                        injectedFieldIndex
-                );
             }
         }
     }
@@ -408,7 +407,7 @@ final class DIGraphPipeline {
         }
 
         String packageName = compilationUnit.get().getPackageDeclaration()
-                .map(pd -> pd.getNameAsString())
+                .map(NodeWithName::getNameAsString)
                 .orElse("");
         if (!packageName.isBlank()) {
             String samePackageCandidate = packageName + "." + simpleName;
