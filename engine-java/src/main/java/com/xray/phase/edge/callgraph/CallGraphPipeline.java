@@ -3,7 +3,6 @@ package com.xray.phase.edge.callgraph;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
-import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import com.xray.engine.NodeIdGenerator;
@@ -36,34 +35,26 @@ public final class CallGraphPipeline {
                     Optional<BlockStmt> body = method.getBody();
                     if (body.isEmpty()) continue;
                     for (MethodCallExpr call : body.get().findAll(MethodCallExpr.class)) {
-                        if (isImplicitThis(call)) {
-                            Optional<Edge> edge = SameClassCallHandler.tryGenerateEdge(classData, call, fromNodeId, declaredIndex);
-                            if (edge.isPresent()) {
-                                writer.writeObject(edge.get());
-                            }
+                        Optional<Edge> sameClassCallEdge = SameClassCallHandler.tryGenerateEdge(classData, call, fromNodeId, declaredIndex);
+                        if (sameClassCallEdge.isPresent()) {
+                            writer.writeObject(sameClassCallEdge.get());
+                            continue;
                         }
-                        if (looksLikeStaticScope(call)) {
-                            Optional<Edge> edge = StaticCallHandler.tryGenerateEdge(call, fromNodeId, input);
-                            if (edge.isPresent()) {
-                                writer.writeObject(edge.get());
-                            }
+
+                        Optional<Edge> injectedFieldCallEdge = InjectedFieldCallHandler.tryGenerateEdge(classData, call, fromNodeId, input);
+                        if (injectedFieldCallEdge.isPresent()) {
+                            writer.writeObject(injectedFieldCallEdge.get());
+                            continue;
+                        }
+
+                        Optional<Edge> staticCallEdge = StaticCallHandler.tryGenerateEdge(call, fromNodeId, input);
+                        if (staticCallEdge.isPresent()) {
+                            writer.writeObject(staticCallEdge.get());
                         }
                     }
                 }
             }
         }
-    }
-
-    private static boolean looksLikeStaticScope(MethodCallExpr call) {
-        if (call.getScope().isEmpty()) return false;
-        var scope = call.getScope().get();
-        return scope.isNameExpr() || scope.isFieldAccessExpr();
-    }
-
-    private static boolean isImplicitThis(MethodCallExpr call) {
-        if (call.getScope().isEmpty()) return true;
-        Expression scope = call.getScope().get();
-        return scope.isThisExpr();
     }
 
     private static Map<NameArity, List<MethodDeclaration>> indexDeclaredMethods(List<MethodDeclaration> methods) {

@@ -1,12 +1,15 @@
 package com.xray.phase.edge.callgraph;
 
+import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.resolution.UnsolvedSymbolException;
 import com.github.javaparser.resolution.declarations.ResolvedMethodDeclaration;
 import com.xray.engine.NodeIdGenerator;
 import com.xray.model.Edge;
 import com.xray.model.Enums;
+import com.xray.model.Evidence;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -18,6 +21,7 @@ final class SameClassCallHandler {
 
     static Optional<Edge> tryGenerateEdge(CallGraphPipeline.Input.ClassData classData, MethodCallExpr call, String fromNodeId,
                                           Map<CallGraphPipeline.NameArity, List<MethodDeclaration>> declaredIndex) {
+        if (!isImplicitThis(call)) return Optional.empty();
         // 1) HIGH confidence - symbol solver resolved exact method
         Optional<String> toHigh = tryResolveSameClass(call, classData.fqcn(), classData.clazz().getMethods());
         if (toHigh.isPresent()) {
@@ -26,7 +30,8 @@ final class SameClassCallHandler {
                     fromNodeId,
                     toNodeId,
                     Enums.EdgeType.CALLS,
-                    Enums.Confidence.HIGH
+                    Enums.Confidence.HIGH,
+                    List.of(methodCallEvidence(call, "same-class-resolved"))
             );
             return Optional.of(edge);
         }
@@ -39,12 +44,19 @@ final class SameClassCallHandler {
                     fromNodeId,
                     toNodeId,
                     Enums.EdgeType.CALLS,
-                    Enums.Confidence.MEDIUM
+                    Enums.Confidence.MEDIUM,
+                    List.of(methodCallEvidence(call, "same-class-name-arity-fallback"))
             );
             return Optional.of(edge);
         }
 
         return Optional.empty();
+    }
+
+    private static boolean isImplicitThis(MethodCallExpr call) {
+        if (call.getScope().isEmpty()) return true;
+        Expression scope = call.getScope().get();
+        return scope.isThisExpr();
     }
 
     /**
@@ -108,5 +120,14 @@ final class SameClassCallHandler {
 
         MethodDeclaration callee = candidates.getFirst();
         return Optional.of(NodeIdGenerator.generateMethodNodeId(ownerFqcn, callee));
+    }
+
+    private static Evidence methodCallEvidence(MethodCallExpr call, String detail) {
+        int line = call.getRange().map(r -> r.begin.line).orElse(-1);
+        String file = call.findCompilationUnit()
+                .flatMap(CompilationUnit::getStorage)
+                .map(storage -> storage.getPath().toString())
+                .orElse(null);
+        return new Evidence(file, line, "method-call", call.toString(), detail);
     }
 }

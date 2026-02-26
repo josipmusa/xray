@@ -1,5 +1,6 @@
 package com.xray.phase.edge.callgraph;
 
+import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MethodCallExpr;
@@ -7,6 +8,7 @@ import com.github.javaparser.resolution.declarations.ResolvedMethodDeclaration;
 import com.xray.engine.NodeIdGenerator;
 import com.xray.model.Edge;
 import com.xray.model.Enums;
+import com.xray.model.Evidence;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -15,13 +17,15 @@ import java.util.Optional;
 final class StaticCallHandler {
 
     static Optional<Edge> tryGenerateEdge(MethodCallExpr call, String fromNodeId, CallGraphPipeline.Input input) {
+        if (!looksLikeStaticScope(call)) return Optional.empty();
         Optional<String> toHigh = tryResolveStaticMethod(call);
         if (toHigh.isPresent()) {
             Edge edge = Edge.v1(
                     fromNodeId,
                     toHigh.get(),
                     Enums.EdgeType.CALLS,
-                    Enums.Confidence.HIGH
+                    Enums.Confidence.HIGH,
+                    List.of(methodCallEvidence(call, "static-resolved"))
             );
             return Optional.of(edge);
         }
@@ -32,12 +36,19 @@ final class StaticCallHandler {
                     fromNodeId,
                     toMedium.get(),
                     Enums.EdgeType.CALLS,
-                    Enums.Confidence.MEDIUM
+                    Enums.Confidence.MEDIUM,
+                    List.of(methodCallEvidence(call, "static-name-arity-fallback"))
             );
             return Optional.of(edge);
         }
 
         return Optional.empty();
+    }
+
+    private static boolean looksLikeStaticScope(MethodCallExpr call) {
+        if (call.getScope().isEmpty()) return false;
+        var scope = call.getScope().get();
+        return scope.isNameExpr() || scope.isFieldAccessExpr();
     }
 
     private static Optional<String> tryHeuristicStaticMethod(MethodCallExpr call, CallGraphPipeline.Input input) {
@@ -145,5 +156,14 @@ final class StaticCallHandler {
         String toNodeId = NodeIdGenerator.generateMethodNodeId(ownerFqcn, resolvedMethodDeclaration);
 
         return Optional.of(toNodeId);
+    }
+
+    private static Evidence methodCallEvidence(MethodCallExpr call, String detail) {
+        int line = call.getRange().map(r -> r.begin.line).orElse(-1);
+        String file = call.findCompilationUnit()
+                .flatMap(CompilationUnit::getStorage)
+                .map(storage -> storage.getPath().toString())
+                .orElse(null);
+        return new Evidence(file, line, "method-call", call.toString(), detail);
     }
 }

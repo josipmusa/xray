@@ -2,6 +2,7 @@ package com.xray.phase.edge;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.ImportDeclaration;
 import com.github.javaparser.ast.body.*;
 import com.github.javaparser.ast.expr.AssignExpr;
@@ -15,6 +16,7 @@ import com.xray.io.JsonlWriter;
 import com.xray.io.OutputLayout;
 import com.xray.model.Edge;
 import com.xray.model.Enums;
+import com.xray.model.Evidence;
 import com.xray.parse.AstIndex;
 import com.xray.phase.edge.callgraph.CallGraphPipeline;
 
@@ -53,7 +55,8 @@ final class DIGraphPipeline {
                             nodeDraft.ownerId(),
                             nodeDraft.id(),
                             Enums.EdgeType.CONTAINS,
-                            Enums.Confidence.HIGH //deterministic
+                            Enums.Confidence.HIGH, //deterministic
+                            List.of(containsEvidence(nodeDraft))
                     );
                     edgeWriter.writeObject(edge);
                 } else if (nodeDraft.kind() == Enums.NodeKind.CLASS && isClassBeanCandidate(nodeDraft)) {
@@ -97,7 +100,8 @@ final class DIGraphPipeline {
                     classDraft.id(),
                     dependencyTargetClassId.get().classId(),
                     Enums.EdgeType.DI,
-                    confidence
+                    confidence,
+                    List.of(diConstructorParamEvidence(parameter))
             );
 
             edgeWriter.writeObject(edge);
@@ -129,7 +133,8 @@ final class DIGraphPipeline {
                     classDraft.id(),
                     dependencyTargetClassId.get().classId(),
                     Enums.EdgeType.DI,
-                    dependencyTargetClassId.get().confidence()
+                    dependencyTargetClassId.get().confidence(),
+                    List.of(diFieldEvidence(fieldDeclaration))
             );
 
             edgeWriter.writeObject(edge);
@@ -171,7 +176,8 @@ final class DIGraphPipeline {
                         classDraft.id(),
                         dependencyTargetClassId.get().classId(),
                         Enums.EdgeType.DI,
-                        confidence
+                        confidence,
+                        List.of(diLombokFieldEvidence(fieldDeclaration, variable))
                 );
                 edgeWriter.writeObject(edge);
 
@@ -433,5 +439,33 @@ final class DIGraphPipeline {
     }
 
     private record ConstructorSelection(ConstructorDeclaration constructor, Enums.Confidence confidence) {
+    }
+
+    private static Evidence containsEvidence(AstIndex.NodeDraft methodDraft) {
+        int startLine = methodDraft.source() == null ? -1 : methodDraft.source().startLine();
+        String file = methodDraft.source() == null ? null : methodDraft.source().file();
+        return new Evidence(file, startLine, "declaration", methodDraft.signature(), "class-contains-method");
+    }
+
+    private static Evidence diConstructorParamEvidence(Parameter parameter) {
+        int line = parameter.getRange().map(r -> r.begin.line).orElse(-1);
+        return new Evidence(sourceFile(parameter), line, "constructor-param", parameter.toString(), "constructor-injection");
+    }
+
+    private static Evidence diFieldEvidence(FieldDeclaration fieldDeclaration) {
+        int line = fieldDeclaration.getRange().map(r -> r.begin.line).orElse(-1);
+        return new Evidence(sourceFile(fieldDeclaration), line, "annotation", fieldDeclaration.toString(), "field-injection");
+    }
+
+    private static Evidence diLombokFieldEvidence(FieldDeclaration fieldDeclaration, VariableDeclarator variable) {
+        int line = fieldDeclaration.getRange().map(r -> r.begin.line).orElse(-1);
+        return new Evidence(sourceFile(fieldDeclaration), line, "heuristic", variable.getNameAsString(), "lombok-inferred-constructor-injection");
+    }
+
+    private static String sourceFile(Node node) {
+        return node.findCompilationUnit()
+                .flatMap(CompilationUnit::getStorage)
+                .map(storage -> storage.getPath().toString())
+                .orElse(null);
     }
 }

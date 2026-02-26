@@ -63,6 +63,7 @@ class DIGraphPipelineTest {
             AstIndex.NodeDraft methodDraft = methodDraftById.get(edge.toId());
             assertNotNull(methodDraft, "Edge points to unknown method node: " + edge.toId());
             assertEquals(methodDraft.ownerId(), edge.fromId());
+            assertHasEvidenceFile(edge);
         }
     }
 
@@ -102,6 +103,7 @@ class DIGraphPipelineTest {
 
         assertEquals(classIdByFqcn.get("OrderService"), diEdges.getFirst().fromId());
         assertEquals(classIdByFqcn.get("OrderRepository"), diEdges.getFirst().toId());
+        assertHasEvidenceFile(diEdges.getFirst());
         assertEquals(
                 List.of(new CallGraphPipeline.Input.InjectedField("orderRepository", "OrderRepository")),
                 result.injectedFieldsByClassFqcn().get("OrderService")
@@ -141,6 +143,7 @@ class DIGraphPipelineTest {
 
         assertEquals(classIdByFqcn.get("PaymentService"), diEdges.getFirst().fromId());
         assertEquals(classIdByFqcn.get("PaymentGateway"), diEdges.getFirst().toId());
+        assertHasEvidenceFile(diEdges.getFirst());
         assertEquals(
                 List.of(new CallGraphPipeline.Input.InjectedField("paymentGateway", "PaymentGateway")),
                 result.injectedFieldsByClassFqcn().get("PaymentService")
@@ -376,4 +379,11 @@ class DIGraphPipelineTest {
     }
 
     private record SourceFile(String fileName, String source) {}
+
+    private static void assertHasEvidenceFile(Edge edge) {
+        assertNotNull(edge.evidence());
+        assertTrue(!edge.evidence().isEmpty());
+        assertNotNull(edge.evidence().getFirst().file());
+        assertTrue(!edge.evidence().getFirst().file().isBlank());
+    }
 }

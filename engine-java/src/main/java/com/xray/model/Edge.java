@@ -30,11 +30,13 @@ public record Edge(
         Map<String, Object> attributes,
         int version
 ) {
+
     public static Edge v1(
             String fromId,
             String toId,
             EdgeType type,
-            Confidence confidence
+            Confidence confidence,
+            List<Evidence> evidence
     ) {
         String canonical =
                 "edge:v1:" +
@@ -43,6 +45,6 @@ public record Edge(
                         type.name() + "|" +
                         confidence.name();
         String id = "e" + Hashing.sha256Hex(canonical);
-        return new Edge(id, fromId, toId, type, confidence, List.of(), Map.of(), SchemaVersion.V1);
+        return new Edge(id, fromId, toId, type, confidence, evidence == null ? List.of() : evidence, Map.of(), SchemaVersion.V1);
     }
 }

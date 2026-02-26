@@ -20,8 +20,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 class CallGraphPipelineTest {
 
@@ -60,6 +59,7 @@ class CallGraphPipelineTest {
         Edge edge = callEdges.getFirst();
         assertEquals(Enums.EdgeType.CALLS, edge.type());
         assertTrue(edge.confidence() == Enums.Confidence.HIGH || edge.confidence() == Enums.Confidence.MEDIUM);
+        assertEvidenceFileEndsWith(edge, "OrderService.java");
     }
 
     @Test
@@ -94,10 +94,130 @@ class CallGraphPipelineTest {
         Edge edge = callEdges.getFirst();
         assertEquals(Enums.EdgeType.CALLS, edge.type());
         assertEquals(Enums.Confidence.HIGH, edge.confidence());
+        assertEvidenceFileEndsWith(edge, "OrderService.java");
 
         var processMethod = clazz.getMethodsByName("process").getFirst();
         assertEquals(NodeIdGenerator.generateMethodNodeId("OrderService", processMethod), edge.fromId());
         assertEquals("OrderService#validate():void", edge.toId());
+    }
+
+    @Test
+    void emitsCallEdgeForInjectedFieldMethodCall() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+
+        Path serviceFile = tempDir.resolve("OrderService.java");
+        Files.writeString(serviceFile, """
+                class OrderService {
+                    private final OrderRepository orderRepository;
+
+                    OrderService(OrderRepository orderRepository) {
+                        this.orderRepository = orderRepository;
+                    }
+
+                    void process() {
+                        orderRepository.save();
+                    }
+                }
+                """);
+
+        Path repositoryFile = tempDir.resolve("OrderRepository.java");
+        Files.writeString(repositoryFile, """
+                class OrderRepository {
+                    void save() {}
+                }
+                """);
+
+        ParsePipeline parsePipeline = new ParsePipeline(JavaParserFactory.initialize(tempDir), objectMapper, outputLayout);
+        AstIndex astIndex = parsePipeline.parseAll(Stream.of(serviceFile, repositoryFile)).astIndex();
+
+        ClassOrInterfaceDeclaration serviceClass = findClass(astIndex, "OrderService").orElseThrow();
+        ClassOrInterfaceDeclaration repositoryClass = findClass(astIndex, "OrderRepository").orElseThrow();
+        CallGraphPipeline.Input input = new CallGraphPipeline.Input(
+                List.of(
+                        new CallGraphPipeline.Input.ClassData(
+                                "OrderService",
+                                serviceClass,
+                                List.of(new CallGraphPipeline.Input.InjectedField("orderRepository", "OrderRepository"))
+                        ),
+                        new CallGraphPipeline.Input.ClassData("OrderRepository", repositoryClass, List.of())
+                )
+        );
+
+        new CallGraphPipeline(objectMapper, outputLayout).emitEdges(input);
+
+        List<Edge> callEdges = readEdges(outputLayout, objectMapper);
+        assertEquals(1, callEdges.size());
+
+        Edge edge = callEdges.getFirst();
+        assertEquals(Enums.EdgeType.CALLS, edge.type());
+        assertTrue(edge.confidence() == Enums.Confidence.HIGH || edge.confidence() == Enums.Confidence.MEDIUM);
+        assertEvidenceFileEndsWith(edge, "OrderService.java");
+
+        var processMethod = serviceClass.getMethodsByName("process").getFirst();
+        var saveMethod = repositoryClass.getMethodsByName("save").getFirst();
+        assertEquals(NodeIdGenerator.generateMethodNodeId("OrderService", processMethod), edge.fromId());
+        assertEquals(NodeIdGenerator.generateMethodNodeId("OrderRepository", saveMethod), edge.toId());
+    }
+
+    @Test
+    void emitsLowConfidenceUncertainEdgeWhenInjectedFieldTargetMethodCannotBeResolved() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+
+        Path serviceFile = tempDir.resolve("OrderService.java");
+        Files.writeString(serviceFile, """
+                class OrderService {
+                    private final OrderRepository orderRepository;
+
+                    OrderService(OrderRepository orderRepository) {
+                        this.orderRepository = orderRepository;
+                    }
+
+                    void process() {
+                        orderRepository.missing();
+                    }
+                }
+                """);
+
+        Path repositoryFile = tempDir.resolve("OrderRepository.java");
+        Files.writeString(repositoryFile, """
+                class OrderRepository {
+                    void save() {}
+                }
+                """);
+
+        ParsePipeline parsePipeline = new ParsePipeline(JavaParserFactory.initialize(tempDir), objectMapper, outputLayout);
+        AstIndex astIndex = parsePipeline.parseAll(Stream.of(serviceFile, repositoryFile)).astIndex();
+
+        ClassOrInterfaceDeclaration serviceClass = findClass(astIndex, "OrderService").orElseThrow();
+        ClassOrInterfaceDeclaration repositoryClass = findClass(astIndex, "OrderRepository").orElseThrow();
+        CallGraphPipeline.Input input = new CallGraphPipeline.Input(
+                List.of(
+                        new CallGraphPipeline.Input.ClassData(
+                                "OrderService",
+                                serviceClass,
+                                List.of(new CallGraphPipeline.Input.InjectedField("orderRepository", "OrderRepository"))
+                        ),
+                        new CallGraphPipeline.Input.ClassData("OrderRepository", repositoryClass, List.of())
+                )
+        );
+
+        new CallGraphPipeline(objectMapper, outputLayout).emitEdges(input);
+
+        List<Edge> callEdges = readEdges(outputLayout, objectMapper);
+        assertEquals(1, callEdges.size());
+
+        Edge edge = callEdges.getFirst();
+        assertEquals(Enums.EdgeType.CALLS, edge.type());
+        assertEquals(Enums.Confidence.LOW, edge.confidence());
+        assertEquals("OrderRepository", edge.toId());
+        assertEquals(true, edge.attributes().get("uncertainTargetMethod"));
+        assertEquals("missing", edge.attributes().get("targetMethodName"));
+        assertEquals(0, edge.attributes().get("targetMethodArity"));
+        assertEquals("orderRepository", edge.attributes().get("injectedField"));
+        assertTrue(edge.evidence() != null && !edge.evidence().isEmpty());
+        assertEvidenceFileEndsWith(edge, "OrderService.java");
     }
 
     private Optional<ClassOrInterfaceDeclaration> firstClass(AstIndex astIndex) {
@@ -105,6 +225,13 @@ class CallGraphPipelineTest {
                 .map(cu -> cu.findFirst(ClassOrInterfaceDeclaration.class))
                 .filter(Optional::isPresent)
                 .map(Optional::get)
+                .findFirst();
+    }
+
+    private Optional<ClassOrInterfaceDeclaration> findClass(AstIndex astIndex, String className) {
+        return astIndex.fileToCu().values().stream()
+                .flatMap(cu -> cu.findAll(ClassOrInterfaceDeclaration.class).stream())
+                .filter(clazz -> clazz.getNameAsString().equals(className))
                 .findFirst();
     }
 
@@ -131,5 +258,12 @@ class CallGraphPipelineTest {
                     })
                     .toList();
         }
+    }
+
+    private void assertEvidenceFileEndsWith(Edge edge, String expectedFileName) {
+        assertNotNull(edge.evidence());
+        assertFalse(edge.evidence().isEmpty());
+        assertNotNull(edge.evidence().getFirst().file());
+        assertTrue(edge.evidence().getFirst().file().endsWith(expectedFileName));
     }
 }
