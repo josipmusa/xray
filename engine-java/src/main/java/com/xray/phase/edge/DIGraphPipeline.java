@@ -1,11 +1,15 @@
 package com.xray.phase.edge;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.ImportDeclaration;
 import com.github.javaparser.ast.body.*;
 import com.github.javaparser.ast.expr.AssignExpr;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.FieldAccessExpr;
 import com.github.javaparser.ast.nodeTypes.NodeWithAnnotations;
+import com.github.javaparser.ast.type.ClassOrInterfaceType;
+import com.github.javaparser.ast.type.PrimitiveType;
 import com.github.javaparser.ast.type.Type;
 import com.xray.io.JsonlWriter;
 import com.xray.io.OutputLayout;
@@ -27,7 +31,11 @@ final class DIGraphPipeline {
             "RestController",
             "Configuration"
     );
-    private static final String AUTOWIRED_ANNOTATION = "Autowired";
+    private static final Set<String> INJECTION_ANNOTATIONS = Set.of("Autowired", "Inject", "Resource");
+    private static final Set<String> LOMBOK_CONSTRUCTOR_ANNOTATIONS = Set.of("RequiredArgsConstructor", "AllArgsConstructor");
+    private static final Set<String> COLLECTION_WRAPPERS = Set.of("List", "Set", "Collection", "java.util.List", "java.util.Set", "java.util.Collection");
+    private static final Set<String> OPTIONAL_WRAPPERS = Set.of("Optional", "java.util.Optional");
+    private static final Set<String> MAP_WRAPPERS = Set.of("Map", "java.util.Map");
     private final ObjectMapper objectMapper;
     private final OutputLayout outputLayout;
 
@@ -54,6 +62,7 @@ final class DIGraphPipeline {
 
                     emitConstructorDiEdges(astIndex, nodeDraft, clazz, edgeWriter, injectedFieldIndex);
                     emitFieldDiEdges(astIndex, nodeDraft, clazz, edgeWriter, injectedFieldIndex);
+                    emitLombokInferredConstructorDiEdges(astIndex, nodeDraft, clazz, edgeWriter, injectedFieldIndex);
                 }
             }
         }
@@ -67,27 +76,28 @@ final class DIGraphPipeline {
             JsonlWriter edgeWriter,
             Map<String, LinkedHashMap<String, CallGraphPipeline.Input.InjectedField>> injectedFieldIndex
     ) throws IOException {
-        Optional<ConstructorDeclaration> constructorDeclaration = selectInjectionConstructor(clazz);
-        if (constructorDeclaration.isEmpty()) {
+        Optional<ConstructorSelection> constructorSelectionOpt = selectInjectionConstructor(clazz);
+        if (constructorSelectionOpt.isEmpty()) {
             return;
         }
 
-        ConstructorDeclaration constructor = constructorDeclaration.get();
+        ConstructorSelection constructorSelection = constructorSelectionOpt.get();
+        ConstructorDeclaration constructor = constructorSelection.constructor();
 
         for (Parameter parameter : constructor.getParameters()) {
-            // MVP: only handle normal class/interface types
-            if (!parameter.getType().isClassOrInterfaceType()) continue;
-
-            Optional<DependencyTargetClassId> dependencyTargetClassId = resolveDependencyTargetClassId(astIndex, parameter.getType());
+            Optional<Type> injectableType = extractInjectableDependencyType(parameter.getType());
+            if (injectableType.isEmpty()) continue;
+            Optional<DependencyTargetClassId> dependencyTargetClassId = resolveDependencyTargetClassId(astIndex, clazz, injectableType.get());
             if (dependencyTargetClassId.isEmpty()) {
                 continue;
             }
+            Enums.Confidence confidence = minConfidence(constructorSelection.confidence(), dependencyTargetClassId.get().confidence());
 
             Edge edge = Edge.v1(
                     classDraft.id(),
                     dependencyTargetClassId.get().classId(),
                     Enums.EdgeType.DI,
-                    dependencyTargetClassId.get().confidence()
+                    confidence
             );
 
             edgeWriter.writeObject(edge);
@@ -96,7 +106,7 @@ final class DIGraphPipeline {
             assignedFieldName.ifPresent(s -> addInjectedField(
                     classDraft.fqcn(),
                     s,
-                    resolveDeclaredTypeFqcn(astIndex, parameter.getType()),
+                    resolveDeclaredTypeFqcn(astIndex, clazz, injectableType.get()),
                     injectedFieldIndex
             ));
         }
@@ -109,12 +119,10 @@ final class DIGraphPipeline {
             JsonlWriter edgeWriter,
             Map<String, LinkedHashMap<String, CallGraphPipeline.Input.InjectedField>> injectedFieldIndex) throws IOException {
         for (FieldDeclaration fieldDeclaration : clazz.getFields()) {
-            if (!hasAutowiredAnnotation(fieldDeclaration)) continue;
-
-            Type type = fieldDeclaration.getElementType();
-            if (!type.isClassOrInterfaceType()) continue;
-
-            Optional<DependencyTargetClassId> dependencyTargetClassId = resolveDependencyTargetClassId(astIndex, type);
+            if (!hasInjectionAnnotation(fieldDeclaration)) continue;
+            Optional<Type> injectableType = extractInjectableDependencyType(fieldDeclaration.getElementType());
+            if (injectableType.isEmpty()) continue;
+            Optional<DependencyTargetClassId> dependencyTargetClassId = resolveDependencyTargetClassId(astIndex, clazz, injectableType.get());
             if (dependencyTargetClassId.isEmpty()) continue;
 
             Edge edge = Edge.v1(
@@ -130,37 +138,84 @@ final class DIGraphPipeline {
                 addInjectedField(
                         classDraft.fqcn(),
                         variable.getNameAsString(),
-                        resolveDeclaredTypeFqcn(astIndex, variable.getType()),
+                        resolveDeclaredTypeFqcn(astIndex, clazz, injectableType.get()),
                         injectedFieldIndex
                 );
             }
         }
     }
 
-    private Optional<ConstructorDeclaration> selectInjectionConstructor(ClassOrInterfaceDeclaration clazz) {
+    private void emitLombokInferredConstructorDiEdges(
+            AstIndex astIndex,
+            AstIndex.NodeDraft classDraft,
+            ClassOrInterfaceDeclaration clazz,
+            JsonlWriter edgeWriter,
+            Map<String, LinkedHashMap<String, CallGraphPipeline.Input.InjectedField>> injectedFieldIndex
+    ) throws IOException {
+        if (!clazz.getConstructors().isEmpty()) return;
+        if (!hasLombokConstructorAnnotation(clazz)) return;
+
+        for (FieldDeclaration fieldDeclaration : clazz.getFields()) {
+            if (fieldDeclaration.isStatic()) continue;
+            if (!fieldDeclaration.isFinal() && !hasNonNullAnnotation(fieldDeclaration)) continue;
+
+            for (VariableDeclarator variable : fieldDeclaration.getVariables()) {
+                Optional<Type> injectableType = extractInjectableDependencyType(variable.getType());
+                if (injectableType.isEmpty()) continue;
+
+                Optional<DependencyTargetClassId> dependencyTargetClassId = resolveDependencyTargetClassId(astIndex, clazz, injectableType.get());
+                if (dependencyTargetClassId.isEmpty()) continue;
+                Enums.Confidence confidence = minConfidence(Enums.Confidence.MEDIUM, dependencyTargetClassId.get().confidence());
+
+                Edge edge = Edge.v1(
+                        classDraft.id(),
+                        dependencyTargetClassId.get().classId(),
+                        Enums.EdgeType.DI,
+                        confidence
+                );
+                edgeWriter.writeObject(edge);
+
+                addInjectedField(
+                        classDraft.fqcn(),
+                        variable.getNameAsString(),
+                        resolveDeclaredTypeFqcn(astIndex, clazz, injectableType.get()),
+                        injectedFieldIndex
+                );
+            }
+        }
+    }
+
+    private Optional<ConstructorSelection> selectInjectionConstructor(ClassOrInterfaceDeclaration clazz) {
         List<ConstructorDeclaration> constructors = clazz.getConstructors();
         if (constructors.isEmpty()) return Optional.empty();
 
-        if (constructors.size() == 1) return Optional.of(constructors.getFirst());
-
-        List<ConstructorDeclaration> autowired = constructors.stream()
-                .filter(this::hasAutowiredAnnotation)
-                .toList();
-        if (autowired.size() == 1) return Optional.of(autowired.getFirst());
-        if (!autowired.isEmpty()) {
-            // multiple @Autowired: pick max params (and later lower confidence)
-            return Optional.of(autowired.stream().max(Comparator.comparingInt(cd -> cd.getParameters().size())).orElseThrow());
+        if (constructors.size() == 1) {
+            return Optional.of(new ConstructorSelection(constructors.getFirst(), Enums.Confidence.HIGH));
         }
 
-        // else: max params
-        return Optional.of(constructors.stream().max(Comparator.comparingInt(cd -> cd.getParameters().size())).orElseThrow());
+        List<ConstructorDeclaration> injected = constructors.stream()
+                .filter(this::isInjectableConstructor)
+                .toList();
+        if (injected.size() == 1) {
+            return Optional.of(new ConstructorSelection(injected.getFirst(), Enums.Confidence.HIGH));
+        }
+        if (injected.size() > 1) {
+            return Optional.of(new ConstructorSelection(
+                    injected.stream().max(Comparator.comparingInt(cd -> cd.getParameters().size())).orElseThrow(),
+                    Enums.Confidence.MEDIUM
+            ));
+        }
+        return Optional.empty();
     }
 
-    private Optional<DependencyTargetClassId> resolveDependencyTargetClassId(AstIndex astIndex, Type t) {
+    private Optional<DependencyTargetClassId> resolveDependencyTargetClassId(
+            AstIndex astIndex,
+            ClassOrInterfaceDeclaration ownerClass,
+            Type dependencyType
+    ) {
         // 1) try symbol solver FQCN
         try {
-            String fqcn = t.resolve().describe(); // e.g. com.acme.Foo
-            // strip generics if present: java.util.List<com.X>
+            String fqcn = dependencyType.resolve().describe();
             String raw = stripGenerics(fqcn);
             String id = astIndex.fqcnToNodeId().get(raw);
             if (id == null) return Optional.empty();
@@ -168,25 +223,33 @@ final class DIGraphPipeline {
         } catch (Exception ignored) {
         }
 
-        // 2) fallback: raw as written -> simple name mapping
-        String raw = stripGenerics(t.asString()); // Foo, List<Foo> -> Foo?
-        String simple = simpleTypeName(raw);      // Foo from Foo or com.a.Foo
+        String raw = stripGenerics(dependencyType.asString());
 
-        // if it’s already qualified:
+        // 2) written type is FQCN
         if (raw.contains(".")) {
             String id = astIndex.fqcnToNodeId().get(raw);
             if (id == null) return Optional.empty();
             return Optional.of(new DependencyTargetClassId(id, Enums.Confidence.MEDIUM));
         }
 
-        List<String> fqcns = astIndex.simpleNameToFqcns().getOrDefault(simple, List.of());
-        if (fqcns.size() == 1) {
-            String id = astIndex.fqcnToNodeId().get(fqcns.getFirst());
-            if (id == null) return Optional.empty();
-            return Optional.of(new DependencyTargetClassId(id, Enums.Confidence.MEDIUM));
+        // 3) imports and same package context
+        Optional<String> fromCompilationUnit = resolveFqcnFromCompilationUnitContext(raw, ownerClass, astIndex);
+        if (fromCompilationUnit.isPresent()) {
+            String id = astIndex.fqcnToNodeId().get(fromCompilationUnit.get());
+            if (id != null) {
+                return Optional.of(new DependencyTargetClassId(id, Enums.Confidence.MEDIUM));
+            }
         }
 
-        // ambiguous or missing
+        // 4) project-wide simple-name fallback
+        List<String> fqcns = astIndex.simpleNameToFqcns().getOrDefault(raw, List.of());
+        if (fqcns.size() == 1) {
+            String id = astIndex.fqcnToNodeId().get(fqcns.getFirst());
+            if (id != null) {
+                return Optional.of(new DependencyTargetClassId(id, Enums.Confidence.MEDIUM));
+            }
+        }
+
         return Optional.empty();
     }
 
@@ -201,8 +264,27 @@ final class DIGraphPipeline {
         return idx >= 0 ? s.substring(idx + 1) : s;
     }
 
-    private boolean hasAutowiredAnnotation(NodeWithAnnotations<?> n) {
-        return n.getAnnotations().stream().anyMatch(a -> a.getName().getIdentifier().equals(AUTOWIRED_ANNOTATION));
+    private boolean hasInjectionAnnotation(NodeWithAnnotations<?> n) {
+        return n.getAnnotations().stream()
+                .map(a -> a.getName().getIdentifier())
+                .anyMatch(INJECTION_ANNOTATIONS::contains);
+    }
+
+    private boolean hasNonNullAnnotation(NodeWithAnnotations<?> n) {
+        return n.getAnnotations().stream()
+                .map(a -> a.getName().getIdentifier())
+                .anyMatch(name -> name.equals("NonNull"));
+    }
+
+    private boolean isInjectableConstructor(ConstructorDeclaration constructorDeclaration) {
+        if (hasInjectionAnnotation(constructorDeclaration)) return true;
+        return constructorDeclaration.getParameters().stream().anyMatch(this::hasInjectionAnnotation);
+    }
+
+    private boolean hasLombokConstructorAnnotation(ClassOrInterfaceDeclaration clazz) {
+        return clazz.getAnnotations().stream()
+                .map(a -> a.getName().getIdentifier())
+                .anyMatch(LOMBOK_CONSTRUCTOR_ANNOTATIONS::contains);
     }
 
     private boolean isClassBeanCandidate(AstIndex.NodeDraft classDraft) {
@@ -250,7 +332,7 @@ final class DIGraphPipeline {
         return Optional.empty();
     }
 
-    private String resolveDeclaredTypeFqcn(AstIndex astIndex, Type type) {
+    private String resolveDeclaredTypeFqcn(AstIndex astIndex, ClassOrInterfaceDeclaration ownerClass, Type type) {
         try {
             return stripGenerics(type.resolve().describe());
         } catch (Exception ignored) {
@@ -261,11 +343,81 @@ final class DIGraphPipeline {
             return raw;
         }
 
-        List<String> matches = astIndex.simpleNameToFqcns().getOrDefault(raw, List.of());
-        if (matches.size() == 1) {
-            return matches.getFirst();
+        Optional<String> fromCompilationUnit = resolveFqcnFromCompilationUnitContext(raw, ownerClass, astIndex);
+        if (fromCompilationUnit.isPresent()) {
+            return fromCompilationUnit.get();
+        }
+
+        List<String> fromSimpleName = astIndex.simpleNameToFqcns().getOrDefault(raw, List.of());
+        if (fromSimpleName.size() == 1) {
+            return fromSimpleName.getFirst();
         }
         return raw;
+    }
+
+    private Optional<Type> extractInjectableDependencyType(Type type) {
+        if (type instanceof PrimitiveType) return Optional.empty();
+        if (!type.isClassOrInterfaceType()) return Optional.empty();
+
+        ClassOrInterfaceType classType = type.asClassOrInterfaceType();
+        String name = classType.getNameWithScope();
+
+        if (OPTIONAL_WRAPPERS.contains(name) || COLLECTION_WRAPPERS.contains(name)) {
+            if (classType.getTypeArguments().isEmpty()) return Optional.empty();
+            List<Type> typeArguments = classType.getTypeArguments().get();
+            if (typeArguments.size() != 1) return Optional.empty();
+            return extractInjectableDependencyType(typeArguments.getFirst());
+        }
+
+        if (MAP_WRAPPERS.contains(name)) {
+            if (classType.getTypeArguments().isEmpty()) return Optional.empty();
+            List<Type> typeArguments = classType.getTypeArguments().get();
+            if (typeArguments.size() < 2) return Optional.empty();
+            return extractInjectableDependencyType(typeArguments.get(1));
+        }
+
+        return Optional.of(type);
+    }
+
+    private Optional<String> resolveFqcnFromCompilationUnitContext(
+            String simpleName,
+            ClassOrInterfaceDeclaration ownerClass,
+            AstIndex astIndex
+    ) {
+        Optional<CompilationUnit> compilationUnit = ownerClass.findCompilationUnit();
+        if (compilationUnit.isEmpty()) return Optional.empty();
+
+        for (ImportDeclaration importDeclaration : compilationUnit.get().getImports()) {
+            if (importDeclaration.isAsterisk()) {
+                String candidate = importDeclaration.getNameAsString() + "." + simpleName;
+                if (astIndex.fqcnToNodeId().containsKey(candidate)) {
+                    return Optional.of(candidate);
+                }
+            } else {
+                String imported = importDeclaration.getNameAsString();
+                if (simpleTypeName(imported).equals(simpleName) && astIndex.fqcnToNodeId().containsKey(imported)) {
+                    return Optional.of(imported);
+                }
+            }
+        }
+
+        String packageName = compilationUnit.get().getPackageDeclaration()
+                .map(pd -> pd.getNameAsString())
+                .orElse("");
+        if (!packageName.isBlank()) {
+            String samePackageCandidate = packageName + "." + simpleName;
+            if (astIndex.fqcnToNodeId().containsKey(samePackageCandidate)) {
+                return Optional.of(samePackageCandidate);
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    private Enums.Confidence minConfidence(Enums.Confidence left, Enums.Confidence right) {
+        if (left == Enums.Confidence.LOW || right == Enums.Confidence.LOW) return Enums.Confidence.LOW;
+        if (left == Enums.Confidence.MEDIUM || right == Enums.Confidence.MEDIUM) return Enums.Confidence.MEDIUM;
+        return Enums.Confidence.HIGH;
     }
 
     private Map<String, List<CallGraphPipeline.Input.InjectedField>> toResultIndex(
@@ -278,5 +430,8 @@ final class DIGraphPipeline {
     }
 
     record Result(Map<String, List<CallGraphPipeline.Input.InjectedField>> injectedFieldsByClassFqcn) {
+    }
+
+    private record ConstructorSelection(ConstructorDeclaration constructor, Enums.Confidence confidence) {
     }
 }

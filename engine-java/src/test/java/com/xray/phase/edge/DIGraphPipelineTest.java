@@ -165,6 +165,160 @@ class DIGraphPipelineTest {
         assertTrue(edges.isEmpty());
     }
 
+    @Test
+    void skipsConstructorInjectionWhenMultipleConstructorsAndNoneAnnotated() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+        AstIndex astIndex = parseAll(
+                objectMapper,
+                outputLayout,
+                file("OrderService.java", """
+                        @Service
+                        class OrderService {
+                            OrderService() {}
+                            OrderService(OrderRepository orderRepository) {}
+                        }
+                        """),
+                file("OrderRepository.java", """
+                        class OrderRepository {}
+                        """)
+        );
+
+        new DIGraphPipeline(objectMapper, outputLayout).emitEdges(astIndex, buildFqcnToClassDecl(astIndex));
+
+        List<Edge> diEdges = readEdges(outputLayout, objectMapper).stream()
+                .filter(edge -> edge.type() == Enums.EdgeType.DI)
+                .toList();
+        assertTrue(diEdges.isEmpty());
+    }
+
+    @Test
+    void usesSingleInjectAnnotatedConstructorWithFallbackTypeResolution() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+        AstIndex astIndex = parseAll(
+                objectMapper,
+                outputLayout,
+                file("OrderService.java", """
+                        @Service
+                        class OrderService {
+                            OrderService() {}
+
+                            @Inject
+                            OrderService(OrderRepository orderRepository) {}
+                        }
+                        """),
+                file("OrderRepository.java", """
+                        class OrderRepository {}
+                        """)
+        );
+
+        List<Edge> diEdges = readEdgesAfterEmit(objectMapper, outputLayout, astIndex).stream()
+                .filter(edge -> edge.type() == Enums.EdgeType.DI)
+                .toList();
+
+        assertEquals(1, diEdges.size());
+        assertEquals(Enums.Confidence.MEDIUM, diEdges.getFirst().confidence());
+    }
+
+    @Test
+    void usesMaxParamsWhenMultipleInjectedConstructorsWithMediumConfidence() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+        AstIndex astIndex = parseAll(
+                objectMapper,
+                outputLayout,
+                file("OrderService.java", """
+                        @Service
+                        class OrderService {
+                            @Autowired
+                            OrderService(OrderRepository repo) {}
+
+                            @Inject
+                            OrderService(OrderRepository repo, AuditRepo auditRepo) {}
+                        }
+                        """),
+                file("OrderRepository.java", """
+                        class OrderRepository {}
+                        """),
+                file("AuditRepo.java", """
+                        class AuditRepo {}
+                        """)
+        );
+
+        List<Edge> diEdges = readEdgesAfterEmit(objectMapper, outputLayout, astIndex).stream()
+                .filter(edge -> edge.type() == Enums.EdgeType.DI)
+                .toList();
+
+        assertEquals(2, diEdges.size());
+        assertTrue(diEdges.stream().allMatch(edge -> edge.confidence() == Enums.Confidence.MEDIUM));
+    }
+
+    @Test
+    void infersLombokConstructorInjectionForFinalAndNonNullFields() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+        AstIndex astIndex = parseAll(
+                objectMapper,
+                outputLayout,
+                file("OrderService.java", """
+                        @Service
+                        @RequiredArgsConstructor
+                        class OrderService {
+                            private final OrderRepository orderRepository;
+                            @NonNull
+                            private AuditRepo auditRepo;
+                        }
+                        """),
+                file("OrderRepository.java", """
+                        class OrderRepository {}
+                        """),
+                file("AuditRepo.java", """
+                        class AuditRepo {}
+                        """)
+        );
+
+        List<Edge> diEdges = readEdgesAfterEmit(objectMapper, outputLayout, astIndex).stream()
+                .filter(edge -> edge.type() == Enums.EdgeType.DI)
+                .toList();
+        assertEquals(2, diEdges.size());
+        assertTrue(diEdges.stream().allMatch(edge -> edge.confidence() == Enums.Confidence.MEDIUM));
+    }
+
+    @Test
+    void unwrapsOptionalCollectionAndMapConstructorDependencies() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+        AstIndex astIndex = parseAll(
+                objectMapper,
+                outputLayout,
+                file("OrderService.java", """
+                        import java.util.List;
+                        import java.util.Map;
+                        import java.util.Optional;
+
+                        @Service
+                        class OrderService {
+                            OrderService(Optional<OrderRepository> repo, List<AuditRepo> audits, Map<String, AlertRepo> alerts) {}
+                        }
+                        """),
+                file("OrderRepository.java", """
+                        class OrderRepository {}
+                        """),
+                file("AuditRepo.java", """
+                        class AuditRepo {}
+                        """),
+                file("AlertRepo.java", """
+                        class AlertRepo {}
+                        """)
+        );
+
+        List<Edge> diEdges = readEdgesAfterEmit(objectMapper, outputLayout, astIndex).stream()
+                .filter(edge -> edge.type() == Enums.EdgeType.DI)
+                .toList();
+        assertEquals(3, diEdges.size());
+    }
+
     private OutputLayout createOutputLayout() throws IOException {
         Path outputRoot = tempDir.resolve(".xray");
         Files.createDirectories(outputRoot);
@@ -210,6 +364,11 @@ class DIGraphPipelineTest {
                     })
                     .toList();
         }
+    }
+
+    private List<Edge> readEdgesAfterEmit(ObjectMapper objectMapper, OutputLayout outputLayout, AstIndex astIndex) throws IOException {
+        new DIGraphPipeline(objectMapper, outputLayout).emitEdges(astIndex, buildFqcnToClassDecl(astIndex));
+        return readEdges(outputLayout, objectMapper);
     }
 
     private SourceFile file(String fileName, String source) {
