@@ -9,6 +9,7 @@ import com.xray.model.Enums;
 import com.xray.parse.AstIndex;
 import com.xray.parse.JavaParserFactory;
 import com.xray.parse.ParsePipeline;
+import com.xray.phase.edge.callgraph.CallGraphPipeline;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -47,8 +48,8 @@ class CallGraphPipelineTest {
         AstIndex astIndex = parsePipeline.parseAll(Stream.of(sourceFile)).astIndex();
 
         ClassOrInterfaceDeclaration clazz = firstClass(astIndex).orElseThrow();
-        CallGraphPipelineInput input = new CallGraphPipelineInput(
-                List.of(new CallGraphPipelineInput.ClassData("OrderService", clazz, null))
+        CallGraphPipeline.Input input = new CallGraphPipeline.Input(
+                List.of(new CallGraphPipeline.Input.ClassData("OrderService", clazz, null))
         );
 
         new CallGraphPipeline(objectMapper, outputLayout).emitCallGraphs(input);
@@ -81,8 +82,8 @@ class CallGraphPipelineTest {
         AstIndex astIndex = parsePipeline.parseAll(Stream.of(sourceFile)).astIndex();
 
         ClassOrInterfaceDeclaration clazz = firstClass(astIndex).orElseThrow();
-        CallGraphPipelineInput input = new CallGraphPipelineInput(
-                List.of(new CallGraphPipelineInput.ClassData("OrderService", clazz, null))
+        CallGraphPipeline.Input input = new CallGraphPipeline.Input(
+                List.of(new CallGraphPipeline.Input.ClassData("OrderService", clazz, null))
         );
 
         new CallGraphPipeline(objectMapper, outputLayout).emitCallGraphs(input);

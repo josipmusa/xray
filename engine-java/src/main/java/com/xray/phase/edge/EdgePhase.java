@@ -5,6 +5,7 @@ import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.xray.io.OutputLayout;
 import com.xray.parse.AstIndex;
+import com.xray.phase.edge.callgraph.CallGraphPipeline;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -24,17 +25,13 @@ public final class EdgePhase {
 
     public void executePhase(AstIndex astIndex) throws IOException {
         Map<String, ClassOrInterfaceDeclaration> fqcnToDecl = buildFqcnToClassDecl(astIndex);
-        List<CallGraphPipelineInput.ClassData> classDataList = new ArrayList<>();
-        for (Map.Entry<String, ClassOrInterfaceDeclaration> entry : fqcnToDecl.entrySet()) {
-            classDataList.add(new CallGraphPipelineInput.ClassData(entry.getKey(), entry.getValue(), null));
-        }
-        CallGraphPipelineInput callGraphPipelineInput = new CallGraphPipelineInput(classDataList);
+        CallGraphPipeline.Input callGraphPipelineInput = buildCallGraphPipelineInput(fqcnToDecl);
 
         this.diGraphPipeline.emitGraphEdges(astIndex, fqcnToDecl);
         this.callGraphPipeline.emitCallGraphs(callGraphPipelineInput);
     }
 
-    private Map<String, ClassOrInterfaceDeclaration> buildFqcnToClassDecl(AstIndex astIndex) {
+    private static Map<String, ClassOrInterfaceDeclaration> buildFqcnToClassDecl(AstIndex astIndex) {
         Map<String, ClassOrInterfaceDeclaration> map = new HashMap<>();
         for (CompilationUnit cu : astIndex.fileToCu().values()) {
             for (ClassOrInterfaceDeclaration c : cu.findAll(ClassOrInterfaceDeclaration.class)) {
@@ -42,5 +39,13 @@ public final class EdgePhase {
             }
         }
         return map;
+    }
+
+    private static CallGraphPipeline.Input buildCallGraphPipelineInput(Map<String, ClassOrInterfaceDeclaration> fqcnToDecl) {
+        List<CallGraphPipeline.Input.ClassData> classDataList = new ArrayList<>();
+        for (Map.Entry<String, ClassOrInterfaceDeclaration> entry : fqcnToDecl.entrySet()) {
+            classDataList.add(new CallGraphPipeline.Input.ClassData(entry.getKey(), entry.getValue(), null));
+        }
+        return new CallGraphPipeline.Input(classDataList);
     }
 }

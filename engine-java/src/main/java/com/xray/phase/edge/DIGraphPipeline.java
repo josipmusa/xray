@@ -1,7 +1,6 @@
 package com.xray.phase.edge;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.ConstructorDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
@@ -15,7 +14,10 @@ import com.xray.model.Enums;
 import com.xray.parse.AstIndex;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 final class DIGraphPipeline {
 
@@ -134,7 +136,8 @@ final class DIGraphPipeline {
             String id = astIndex.fqcnToNodeId().get(raw);
             if (id == null) return Optional.empty();
             return Optional.of(new DependencyTargetClassId(id, Enums.Confidence.HIGH));
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
 
         // 2) fallback: raw as written -> simple name mapping
         String raw = stripGenerics(t.asString()); // Foo, List<Foo> -> Foo?
@@ -181,5 +184,6 @@ final class DIGraphPipeline {
         return false;
     }
 
-    private record DependencyTargetClassId(String classId, Enums.Confidence confidence) {}
+    private record DependencyTargetClassId(String classId, Enums.Confidence confidence) {
+    }
 }

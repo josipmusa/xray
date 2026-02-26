@@ -1,0 +1,89 @@
+package com.xray.phase.edge.callgraph;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.expr.Expression;
+import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.ast.stmt.BlockStmt;
+import com.xray.engine.NodeIdGenerator;
+import com.xray.io.JsonlWriter;
+import com.xray.io.OutputLayout;
+import com.xray.model.Edge;
+
+import java.io.IOException;
+import java.util.*;
+
+public final class CallGraphPipeline {
+
+    private final ObjectMapper objectMapper;
+    private final OutputLayout outputLayout;
+
+    public CallGraphPipeline(ObjectMapper objectMapper, OutputLayout outputLayout) {
+        this.objectMapper = objectMapper;
+        this.outputLayout = outputLayout;
+    }
+
+    public void emitCallGraphs(Input input) throws IOException {
+        try (JsonlWriter writer = new JsonlWriter(outputLayout.getEdges(), objectMapper)) {
+            for (Input.ClassData classData : input.classData()) {
+
+                // index declared methods by (name, arity)
+                Map<NameArity, List<MethodDeclaration>> declaredIndex = indexDeclaredMethods(classData.clazz().getMethods());
+
+                for (MethodDeclaration method : classData.clazz().getMethods()) {
+                    String fromNodeId = NodeIdGenerator.generateMethodNodeId(classData.fqcn(), method);
+                    Optional<BlockStmt> body = method.getBody();
+                    if (body.isEmpty()) continue;
+                    for (MethodCallExpr call : body.get().findAll(MethodCallExpr.class)) {
+                        if (isImplicitThis(call)) {
+                            Optional<Edge> edge = SameClassCallHandler.tryGenerateEdge(classData, call, fromNodeId, declaredIndex);
+                            if (edge.isPresent()) {
+                                writer.writeObject(edge.get());
+                            }
+                        }
+                        if (looksLikeStaticScope(call)) {
+                            Optional<Edge> edge = StaticCallHandler.tryGenerateEdge(call, fromNodeId, input);
+                            if (edge.isPresent()) {
+                                writer.writeObject(edge.get());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static boolean looksLikeStaticScope(MethodCallExpr call) {
+        if (call.getScope().isEmpty()) return false;
+        var scope = call.getScope().get();
+        return scope.isNameExpr() || scope.isFieldAccessExpr();
+    }
+
+    private static boolean isImplicitThis(MethodCallExpr call) {
+        if (call.getScope().isEmpty()) return true;
+        Expression scope = call.getScope().get();
+        return scope.isThisExpr();
+    }
+
+    private static Map<NameArity, List<MethodDeclaration>> indexDeclaredMethods(List<MethodDeclaration> methods) {
+        Map<NameArity, List<MethodDeclaration>> index = new HashMap<>();
+        for (MethodDeclaration md : methods) {
+            NameArity key = new NameArity(md.getNameAsString(), md.getParameters().size());
+            index.computeIfAbsent(key, __ -> new ArrayList<>()).add(md);
+        }
+        return index;
+    }
+
+    public record Input(List<ClassData> classData) {
+
+        public record ClassData(String fqcn, ClassOrInterfaceDeclaration clazz, List<InjectedFields> injectedFields) {
+        }
+
+        public record InjectedFields(String fieldName, String declaredTypeFqcn) {
+        }
+    }
+
+    record NameArity(String name, int arity) {
+    }
+}
