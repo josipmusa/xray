@@ -85,6 +85,73 @@ class EdgePhaseTest {
         assertTrue(edges.stream().anyMatch(edge -> edge.type() == Enums.EdgeType.PERSISTENCE_HIT && edge.toId().equals("OrderRepository")));
     }
 
+    @Test
+    void executePhaseProducesOutboundCallEdgeForFeignCall() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+
+        Path serviceFile = tempDir.resolve("OrderService.java");
+        Files.writeString(serviceFile, """
+                @Service
+                class OrderService {
+                    private final PaymentsClient paymentsClient;
+
+                    OrderService(PaymentsClient paymentsClient) {
+                        this.paymentsClient = paymentsClient;
+                    }
+
+                    void process() {
+                        paymentsClient.charge("42");
+                    }
+                }
+                """);
+        Path clientFile = tempDir.resolve("PaymentsClient.java");
+        Files.writeString(clientFile, """
+                @FeignClient(name = "payments-service")
+                interface PaymentsClient {
+                    String charge(String orderId);
+                }
+                """);
+
+        ParsePipeline parsePipeline = new ParsePipeline(JavaParserFactory.initialize(tempDir), objectMapper, outputLayout);
+        AstIndex astIndex = parsePipeline.parseAll(Stream.of(serviceFile, clientFile)).astIndex();
+
+        new EdgePhase(objectMapper, outputLayout).executePhase(astIndex);
+
+        List<Edge> edges = readEdges(outputLayout, objectMapper);
+        assertTrue(edges.stream().anyMatch(edge -> edge.type() == Enums.EdgeType.OUTBOUND_CALL && edge.toId().equals("outbound:feign:payments-service")));
+    }
+
+    @Test
+    void executePhaseProducesOutboundCallEdgeForRestClientCall() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+
+        Path serviceFile = tempDir.resolve("OrderService.java");
+        Files.writeString(serviceFile, """
+                @Service
+                class OrderService {
+                    private final RestClient restClient;
+
+                    OrderService(RestClient restClient) {
+                        this.restClient = restClient;
+                    }
+
+                    void process() {
+                        restClient.get();
+                    }
+                }
+                """);
+
+        ParsePipeline parsePipeline = new ParsePipeline(JavaParserFactory.initialize(tempDir), objectMapper, outputLayout);
+        AstIndex astIndex = parsePipeline.parseAll(Stream.of(serviceFile)).astIndex();
+
+        new EdgePhase(objectMapper, outputLayout).executePhase(astIndex);
+
+        List<Edge> edges = readEdges(outputLayout, objectMapper);
+        assertTrue(edges.stream().anyMatch(edge -> edge.type() == Enums.EdgeType.OUTBOUND_CALL && edge.toId().equals("outbound:http")));
+    }
+
     private OutputLayout createOutputLayout() throws IOException {
         Path outputRoot = tempDir.resolve(".xray");
         Files.createDirectories(outputRoot);

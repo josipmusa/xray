@@ -146,29 +146,19 @@ final class InjectedFieldCallHandler {
             CallGraphPipeline.Input.InjectedField injectedField
     ) {
         Evidence evidence = methodCallEvidence(call, "injected-field-unresolved-target-method");
-        Edge base = Edge.v1(
+        return Edge.v2(
                 fromNodeId,
                 targetClassFqcn,
                 Enums.EdgeType.CALLS,
                 Enums.Confidence.LOW,
-                List.of(evidence)
-        );
-        Map<String, Object> attributes = Map.of(
-                "uncertainTargetMethod", true,
-                "injectedField", injectedField.fieldName(),
-                "targetClass", targetClassFqcn,
-                "targetMethodName", call.getNameAsString(),
-                "targetMethodArity", call.getArguments().size()
-        );
-        return new Edge(
-                base.id(),
-                base.fromId(),
-                base.toId(),
-                base.type(),
-                base.confidence(),
                 List.of(evidence),
-                attributes,
-                base.version()
+                Map.of(
+                        "uncertainTargetMethod", true,
+                        "injectedField", injectedField.fieldName(),
+                        "targetClass", targetClassFqcn,
+                        "targetMethodName", call.getNameAsString(),
+                        "targetMethodArity", call.getArguments().size()
+                )
         );
     }
 

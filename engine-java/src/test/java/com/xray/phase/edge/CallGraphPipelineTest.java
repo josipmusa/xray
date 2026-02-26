@@ -345,6 +345,178 @@ class CallGraphPipelineTest {
         assertTrue(edges.stream().anyMatch(edge -> edge.type() == Enums.EdgeType.PERSISTENCE_HIT && edge.toId().equals("persistence:db")));
     }
 
+    @Test
+    void emitsOutboundCallForFeignClientCall() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+
+        Path serviceFile = tempDir.resolve("OrderService.java");
+        Files.writeString(serviceFile, """
+                class OrderService {
+                    private final PaymentsClient paymentsClient;
+
+                    OrderService(PaymentsClient paymentsClient) {
+                        this.paymentsClient = paymentsClient;
+                    }
+
+                    void process() {
+                        paymentsClient.charge("42");
+                    }
+                }
+                """);
+        Path clientFile = tempDir.resolve("PaymentsClient.java");
+        Files.writeString(clientFile, """
+                @FeignClient(name = "payments-service")
+                interface PaymentsClient {
+                    String charge(String orderId);
+                }
+                """);
+
+        ParsePipeline parsePipeline = new ParsePipeline(JavaParserFactory.initialize(tempDir), objectMapper, outputLayout);
+        AstIndex astIndex = parsePipeline.parseAll(Stream.of(serviceFile, clientFile)).astIndex();
+
+        ClassOrInterfaceDeclaration serviceClass = findClass(astIndex, "OrderService").orElseThrow();
+        ClassOrInterfaceDeclaration clientClass = findClass(astIndex, "PaymentsClient").orElseThrow();
+        CallGraphPipeline.Input input = new CallGraphPipeline.Input(
+                List.of(
+                        new CallGraphPipeline.Input.ClassData(
+                                "OrderService",
+                                serviceClass,
+                                List.of(new CallGraphPipeline.Input.InjectedField("paymentsClient", "PaymentsClient"))
+                        ),
+                        new CallGraphPipeline.Input.ClassData("PaymentsClient", clientClass, List.of())
+                )
+        );
+
+        new CallGraphPipeline(objectMapper, outputLayout).emitEdges(input);
+
+        List<Edge> edges = readEdges(outputLayout, objectMapper);
+        assertTrue(edges.stream().anyMatch(edge ->
+                edge.type() == Enums.EdgeType.OUTBOUND_CALL
+                        && edge.toId().equals("outbound:feign:payments-service")));
+    }
+
+    @Test
+    void emitsOutboundCallForRestTemplateWithHints() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+
+        Path serviceFile = tempDir.resolve("OrderService.java");
+        Files.writeString(serviceFile, """
+                class OrderService {
+                    @Value("${payments.base-url}")
+                    String paymentsBaseUrl;
+                    private final RestTemplate restTemplate;
+
+                    OrderService(RestTemplate restTemplate) {
+                        this.restTemplate = restTemplate;
+                    }
+
+                    void process() {
+                        restTemplate.getForObject("/payments", String.class);
+                        restTemplate.getForObject(paymentsBaseUrl, String.class);
+                    }
+                }
+                """);
+
+        ParsePipeline parsePipeline = new ParsePipeline(JavaParserFactory.initialize(tempDir), objectMapper, outputLayout);
+        AstIndex astIndex = parsePipeline.parseAll(Stream.of(serviceFile)).astIndex();
+
+        ClassOrInterfaceDeclaration serviceClass = findClass(astIndex, "OrderService").orElseThrow();
+        CallGraphPipeline.Input input = new CallGraphPipeline.Input(
+                List.of(new CallGraphPipeline.Input.ClassData(
+                        "OrderService",
+                        serviceClass,
+                        List.of(new CallGraphPipeline.Input.InjectedField("restTemplate", "RestTemplate"))
+                ))
+        );
+
+        new CallGraphPipeline(objectMapper, outputLayout).emitEdges(input);
+
+        List<Edge> edges = readEdges(outputLayout, objectMapper).stream()
+                .filter(edge -> edge.type() == Enums.EdgeType.OUTBOUND_CALL && edge.toId().equals("outbound:http"))
+                .toList();
+        assertEquals(2, edges.size());
+        assertTrue(edges.stream().anyMatch(edge -> "/payments".equals(edge.attributes().get("outbound.urlHint"))));
+        assertTrue(edges.stream().anyMatch(edge -> "${payments.base-url}".equals(edge.attributes().get("outbound.hostHint"))));
+    }
+
+    @Test
+    void emitsOutboundCallForWebClientUsage() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+
+        Path serviceFile = tempDir.resolve("OrderService.java");
+        Files.writeString(serviceFile, """
+                class OrderService {
+                    private final WebClient webClient;
+
+                    OrderService(WebClient webClient) {
+                        this.webClient = webClient;
+                    }
+
+                    void process() {
+                        webClient.get();
+                    }
+                }
+                """);
+
+        ParsePipeline parsePipeline = new ParsePipeline(JavaParserFactory.initialize(tempDir), objectMapper, outputLayout);
+        AstIndex astIndex = parsePipeline.parseAll(Stream.of(serviceFile)).astIndex();
+
+        ClassOrInterfaceDeclaration serviceClass = findClass(astIndex, "OrderService").orElseThrow();
+        CallGraphPipeline.Input input = new CallGraphPipeline.Input(
+                List.of(new CallGraphPipeline.Input.ClassData(
+                        "OrderService",
+                        serviceClass,
+                        List.of(new CallGraphPipeline.Input.InjectedField("webClient", "WebClient"))
+                ))
+        );
+
+        new CallGraphPipeline(objectMapper, outputLayout).emitEdges(input);
+
+        List<Edge> edges = readEdges(outputLayout, objectMapper);
+        assertTrue(edges.stream().anyMatch(edge -> edge.type() == Enums.EdgeType.OUTBOUND_CALL && edge.toId().equals("outbound:http")));
+    }
+
+    @Test
+    void emitsOutboundCallForRestClientUsage() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OutputLayout outputLayout = createOutputLayout();
+
+        Path serviceFile = tempDir.resolve("OrderService.java");
+        Files.writeString(serviceFile, """
+                class OrderService {
+                    private final RestClient restClient;
+
+                    OrderService(RestClient restClient) {
+                        this.restClient = restClient;
+                    }
+
+                    void process() {
+                        restClient.get();
+                    }
+                }
+                """);
+
+        ParsePipeline parsePipeline = new ParsePipeline(JavaParserFactory.initialize(tempDir), objectMapper, outputLayout);
+        AstIndex astIndex = parsePipeline.parseAll(Stream.of(serviceFile)).astIndex();
+
+        ClassOrInterfaceDeclaration serviceClass = findClass(astIndex, "OrderService").orElseThrow();
+        CallGraphPipeline.Input input = new CallGraphPipeline.Input(
+                List.of(new CallGraphPipeline.Input.ClassData(
+                        "OrderService",
+                        serviceClass,
+                        List.of(new CallGraphPipeline.Input.InjectedField("restClient", "RestClient"))
+                ))
+        );
+
+        new CallGraphPipeline(objectMapper, outputLayout).emitEdges(input);
+
+        List<Edge> edges = readEdges(outputLayout, objectMapper);
+        assertTrue(edges.stream().anyMatch(edge -> edge.type() == Enums.EdgeType.OUTBOUND_CALL && edge.toId().equals("outbound:http")));
+    }
+
     private Optional<ClassOrInterfaceDeclaration> firstClass(AstIndex astIndex) {
         return astIndex.fileToCu().values().stream()
                 .map(cu -> cu.findFirst(ClassOrInterfaceDeclaration.class))

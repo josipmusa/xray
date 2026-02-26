@@ -47,4 +47,31 @@ public record Edge(
         String id = "e" + Hashing.sha256Hex(canonical);
         return new Edge(id, fromId, toId, type, confidence, evidence == null ? List.of() : evidence, Map.of(), SchemaVersion.V1);
     }
+
+    public static Edge v2(
+            String fromId,
+            String toId,
+            EdgeType type,
+            Confidence confidence,
+            List<Evidence> evidence,
+            Map<String, Object> attributes
+    ) {
+        String canonical =
+                "edge:v2:" +
+                        fromId + "|" +
+                        toId + "|" +
+                        type.name() + "|" +
+                        confidence.name();
+        String id = "e" + Hashing.sha256Hex(canonical);
+        return new Edge(
+                id,
+                fromId,
+                toId,
+                type,
+                confidence,
+                evidence == null ? List.of() : evidence,
+                attributes == null ? Map.of() : Map.copyOf(attributes),
+                SchemaVersion.V1
+        );
+    }
 }

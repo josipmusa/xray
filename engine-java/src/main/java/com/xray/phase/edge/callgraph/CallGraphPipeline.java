@@ -50,6 +50,11 @@ public final class CallGraphPipeline {
                         if (persistenceHitEdge.isPresent()) {
                             writer.writeObject(persistenceHitEdge.get());
                         }
+
+                        Optional<Edge> outboundEdge = OutboundCallHandler.tryGenerateEdge(classData, call, fromNodeId, input);
+                        if (outboundEdge.isPresent()) {
+                            writer.writeObject(outboundEdge.get());
+                        }
                     }
                 }
             }
